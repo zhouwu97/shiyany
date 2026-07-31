@@ -113,27 +113,77 @@ def choose_version(reports: Mapping[str, Mapping[str, object]]) -> dict[str, obj
 
     if "v2" in reports:
         accepted, details = _beats(reports["v2"], reports["v1"])
-        comparisons["v2_vs_v1"] = {"accepted": accepted, **details}
+        comparisons["v2_vs_v1"] = {
+            "accepted": accepted,
+            "eligible_for_selection": True,
+            **details,
+        }
         if accepted:
             selected = "v2"
 
-    if selected == "v2" and "v25" in reports:
+    if "v2" in reports and "v25" in reports:
         accepted, details = _beats(reports["v25"], reports["v2"])
-        comparisons["v25_vs_v2"] = {"accepted": accepted, **details}
-        if accepted:
+        eligible = selected == "v2"
+        comparisons["v25_vs_v2"] = {
+            "accepted": accepted,
+            "eligible_for_selection": eligible,
+            **details,
+        }
+        if eligible and accepted:
             selected = "v25"
 
-    if selected == "v25" and "v3" in reports:
+    if "v25" in reports and "v3" in reports:
         accepted, details = _beats(reports["v3"], reports["v25"])
-        comparisons["v3_vs_v25"] = {"accepted": accepted, **details}
-        if accepted:
+        eligible = selected == "v25"
+        comparisons["v3_vs_v25"] = {
+            "accepted": accepted,
+            "eligible_for_selection": eligible,
+            **details,
+        }
+        if eligible and accepted:
             selected = "v3"
+
+    rejected = [name for name, item in comparisons.items() if not item["accepted"]]
+    ineligible = [
+        name
+        for name, item in comparisons.items()
+        if item["accepted"] and not item["eligible_for_selection"]
+    ]
+    if rejected or ineligible:
+        details = []
+        if rejected:
+            details.append(
+                f"{', '.join(rejected)} 未同时满足平均值、折胜率、盲折、"
+                "最差折和双目标稳定性要求"
+            )
+        if ineligible:
+            details.append(f"{', '.join(ineligible)} 的前置版本未晋级")
+        reason = (
+            f"{selected.upper()} 是通过逐级门槛的最高版本；"
+            + "；".join(details)
+        )
+    else:
+        reason = f"{selected.upper()} 是通过全部已提供逐级门槛的最高版本"
+
+    report_summary = {
+        version: {
+            "mean_mape": float(report["mean_mape"]),
+            "mean_persistence_mape": float(
+                report.get("mean_persistence_mape", report["mean_mape"])
+            ),
+            "folds": len(report["folds"]),
+            "wins_vs_persistence": int(report.get("wins", 0)),
+        }
+        for version, report in reports.items()
+    }
 
     return {
         "selected_version": selected,
+        "reason": reason,
         "policy": (
             "mean_better_and_majority_nonoverlap_wins_and_blind_not_worse_"
             "and_worst_fold_degradation_lte_0.003_and_both_targets_not_worse"
         ),
+        "report_summary": report_summary,
         "comparisons": comparisons,
     }

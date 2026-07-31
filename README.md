@@ -57,6 +57,21 @@ python scripts/audit_data.py --data-dir "data/raw/official/初赛-参赛者使�
 
 ## 训练、预测与提交
 
+正式自动编排入口会依次执行训练/测试数据审计、四版本15折以上滚动验证、未来扰动测试、规则选型、全量重训、逐时刻预测、结果校验和确定性ZIP打包：
+
+```powershell
+python scripts/auto_pipeline.py `
+  --train-dir "data/raw/official/初赛-参赛者使用" `
+  --test-dir "data/raw/scoring/初赛-评分所用测试集" `
+  --jobs 4
+```
+
+默认比较`v1`、`v2`、`v25`和`v3`，每个版本必须生成至少15个非重叠滚动折。选择规则固定为平均MAPE更低、多数折获胜、盲折不退化、最差折退化不超过0.3个百分点、两个目标均不持续变差；未来扰动测试失败时流水线立即停止。自动流程不读取测试期未来标签，不接收排行榜反馈，也不进行测试预测值人工修正。
+
+自动调参不属于正式默认入口。需要开展参数搜索时，应使用独立训练期实验目录、同一套滚动折和有限候选集合，完成后再把冻结配置交给本入口验收。
+
+也可以分步执行已有命令：
+
 ```powershell
 # 先用训练期滚动报告选择版本；当前真实盲折默认选择 V2
 python scripts/train.py --data-dir "data/raw/official/初赛-参赛者使用" --version v2 --output artifacts/model.joblib
@@ -78,7 +93,7 @@ python scripts/package_submission.py `
 ```powershell
 python scripts/backtest.py --data-dir "data/raw/official/初赛-参赛者使用" --version v1 --jobs 4 --output results/raw/backtest_v1_20fold.json
 python scripts/backtest.py --data-dir "data/raw/official/初赛-参赛者使用" --version v2 --jobs 4 --output results/raw/backtest_v2_20fold.json
-python scripts/select_model.py --v1 results/raw/backtest_v1_20fold.json --v2 results/raw/backtest_v2_20fold.json --output results/raw/model_selection_20fold.json
+python scripts/select_model.py --data-dir "data/raw/official/初赛-参赛者使用" --v1 results/raw/backtest_v1_20fold.json --v2 results/raw/backtest_v2_20fold.json --output results/raw/model_selection_20fold.json
 ```
 
 若平台仍要求数据字典中的旧版 JSON，可单独执行：

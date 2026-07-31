@@ -36,6 +36,19 @@ def test_future_perturbation_does_not_change_origin_features() -> None:
     pd.testing.assert_series_equal(baseline.loc[origin], changed.loc[origin])
 
 
+def test_missing_indicator_schema_does_not_depend_on_future_missing_values() -> None:
+    frame = _frame()
+    origin = frame.index[80]
+    baseline = build_causal_features(frame)
+    changed = frame.copy()
+    changed.loc[changed.index > origin, "generator_1"] = np.nan
+    perturbed = build_causal_features(changed)
+
+    assert "feat_missing_generator_1" in baseline.columns
+    assert list(baseline.columns) == list(perturbed.columns)
+    pd.testing.assert_series_equal(baseline.loc[origin], perturbed.loc[origin])
+
+
 def test_rolling_mean_excludes_current_value() -> None:
     frame = _frame(20)
     features = build_causal_features(

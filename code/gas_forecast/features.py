@@ -114,9 +114,9 @@ def build_causal_features(
         column: filled[column] for column in filled.columns
     }
 
+    # 缺失标记的字段集合只由输入结构决定，不能因未来区间是否出现缺失而变化。
     for column in numeric.columns:
-        if missing[column].any():
-            feature_values[f"feat_missing_{column}"] = missing[column].astype("int8")
+        feature_values[f"feat_missing_{column}"] = missing[column].astype("int8")
 
     if {"generator_1", "generator_all"}.issubset(filled.columns):
         feature_values["feat_generator_rest"] = filled["generator_all"] - filled["generator_1"]

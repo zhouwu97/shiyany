@@ -37,3 +37,22 @@ def test_version_selection_requires_majority_and_blind_not_worse() -> None:
     )
     assert decision["selected_version"] == "v25"
     assert decision["comparisons"]["v3_vs_v25"]["blind_not_worse"] is False
+    assert decision["comparisons"]["v3_vs_v25"]["eligible_for_selection"] is True
+    assert "v3_vs_v25" in decision["reason"]
+    assert decision["report_summary"]["v1"]["folds"] == 3
+
+
+def test_higher_version_is_still_diagnosed_when_predecessor_fails() -> None:
+    decision = choose_version(
+        {
+            "v1": _report("v1", [0.060, 0.061, 0.062]),
+            "v2": _report("v2", [0.058, 0.059, 0.060]),
+            "v25": _report("v25", [0.059, 0.060, 0.061]),
+            "v3": _report("v3", [0.057, 0.058, 0.059]),
+        }
+    )
+
+    assert decision["selected_version"] == "v2"
+    assert "v3_vs_v25" in decision["comparisons"]
+    assert decision["comparisons"]["v3_vs_v25"]["accepted"] is True
+    assert decision["comparisons"]["v3_vs_v25"]["eligible_for_selection"] is False
