@@ -216,3 +216,16 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# 赛事数据受使用协议限制，不进入公共仓库
+data/raw/
+data/interim/
+artifacts/
+submissions/
+runs/
+.tmp/
+results/raw/*
+!results/raw/.gitkeep
+*.pdf
+*.zip
+注意事项.txt
