@@ -15,7 +15,7 @@
 | P2 V2 增强 | 煤气供需代理、气柜、煤气隐含负荷、近期模型、LightGBM 残差 | 多数滚动折不劣于 V1；失败时自动回退 V1 | `feat: add gas-aware residual ensemble` |
 | P2.5 稳健候选 | `generator_rest` 状态、煤气切换事件、连续线性门控 | 平均与多数折优于 V2；失败时回退 V2 | `feat: add low-complexity continuous gating` |
 | P3 V3 冲分 | GMM 状态、升/稳/降概率、动态软门控、分歧收缩 | 盲折及多数开发折优于 V2.5 才可选为提交模型 | `feat: add state-aware dynamic gating` |
-| P4 交付 | 滚动验证、训练/推理 CLI、提交校验、说明文档 | 一条命令产出合法宽表；未来扰动测试严格不变 | `docs: finalize reproducible competition workflow` |
+| P4 交付 | 四版本自动滚动验证、机械选型、训练/推理、提交校验与打包 | 一条命令完成15+折选型并产出合法ZIP；未来扰动测试严格不变 | `feat: automate guarded training and submission pipeline` |
 
 每个阶段执行 `pytest -q` 和对应真实数据 smoke run 后再提交，并立即推送 `main`。后一阶段出现问题时，前一提交仍是可运行保底版本。
 
@@ -64,21 +64,18 @@
 - 3 月下旬至 4 月底每 2 天一个验证起点，每折覆盖 2 天；最后 4 天为盲折。
 - 训练起点与验证起点之间至少保留 8 个 15 分钟标签隔离步。
 - 每折重新拟合填补器、标准化器、Ridge、GMM、LightGBM、融合和门控。
-- 同时报告持续性、V1、V2、V3 的总 MAPE、目标维度 MAPE、步长 MAPE 和折间胜率。
+- 同时报告持续性、V1、V2、V2.5、V3 的总 MAPE、目标维度 MAPE、步长 MAPE 和折间胜率。
 - V2 晋级还要求最大单折退化不超过 0.3 个百分点，且两个目标的跨折平均 MAPE 均不高于 V1。
-- 未来扰动测试会修改起点后的所有生产数据，并断言该起点预测逐位完全一致。
+- 未来扰动测试会修改起点后的所有生产数据，并断言该起点的完整特征逐位完全一致；模型预测只接收该起点特征。
 - 测试期评分脚本与训练/预测脚本物理分离，且只接受已存在、内容冻结的预测文件。
 
 ## 6. 最终命令链
 
 ```powershell
-python scripts/audit_data.py --data-dir <训练目录> --output results/raw/data_audit.json
-python scripts/backtest.py --data-dir <训练目录> --version v1
-python scripts/backtest.py --data-dir <训练目录> --version v2
-python scripts/backtest.py --data-dir <训练目录> --version v3 --blind
-python scripts/train.py --data-dir <训练目录> --version auto --output artifacts/model.joblib
-python scripts/predict.py --train-dir <训练目录> --test-dir <评测输入目录> --model artifacts/model.joblib
-python scripts/validate_submission.py --input submissions/s_result.csv
+python scripts/auto_pipeline.py `
+  --train-dir <训练目录> `
+  --test-dir <评测输入目录> `
+  --jobs 4
 ```
 
-`auto` 只依据训练期滚动验证选择版本，绝不读取测试期未来真实值。V3 未同时通过盲折与多数折胜率时，自动提交 V2；V2 未通过时回退 V1。
+自动入口默认比较V1、V2、V2.5和V3，每个版本至少需要15个滚动折，并硬性校验192行、16个预测字段及ZIP内唯一的`result.csv`。选型只依据训练期滚动验证，绝不读取测试期未来真实值；高阶版本未通过逐级门槛时回退到已经通过的最高版本。
