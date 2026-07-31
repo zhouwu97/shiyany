@@ -219,6 +219,7 @@ __marimo__/
 
 # 赛事数据受使用协议限制，不进入公共仓库
 data/raw/
+煤气发电预测优化-初赛训练和测试集/
 data/interim/
 artifacts/
 submissions/
