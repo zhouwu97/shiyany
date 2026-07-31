@@ -9,8 +9,10 @@ python-dateutil==2.9.0.post0
 pytz==2025.2
 scikit-learn==1.8.0
 scipy==1.17.0
+setuptools==80.10.2
 six==1.17.0
 threadpoolctl==3.6.0
 tzdata==2025.3
 pytest==8.3.4
 ruff==0.15.21
+wheel==0.47.0
