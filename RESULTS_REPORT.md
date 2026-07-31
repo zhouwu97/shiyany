@@ -12,3 +12,18 @@
 
 正式结论必须来自 `results/raw/` 中登记的真实命令、配置、折明细和指标。测试期得分只在预测冻结后用于最终评估，不用于继续调参。
 
+## 2026-07-31 V1 真实盲折 smoke
+
+命令：
+
+```powershell
+python scripts/backtest.py --data-dir "data/raw/official/初赛-参赛者使用" --version v1 --max-folds 1 --output results/raw/backtest_v1_smoke.json
+```
+
+| 指标 | 结果 |
+| --- | ---: |
+| 最后 4 天盲折持续性 MAPE | 6.1437% |
+| 最后 4 天盲折 V1 MAPE | 5.9333% |
+| 相对持续性改善 | 3.42% |
+
+结论：V1 在该盲折通过最低可行性门槛。这里只是单盲折 smoke，不替代完整滚动验证。端到端推理已生成 192 个评测滚动起点、16 个预测字段且无缺失；未读取评测期未来标签进行调参。
