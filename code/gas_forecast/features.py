@@ -23,6 +23,14 @@ class PriceSchedule:
         return self.values[slots, months]
 
 
+@dataclass(frozen=True)
+class FeatureAvailability:
+    """特征相对预测起点的最大信息时间。"""
+
+    max_offset_minutes: int
+    known_in_advance: bool = False
+
+
 def load_price_schedule(path: str | Path) -> PriceSchedule:
     """读取官方 48 行、12 个月电价表。"""
 
@@ -150,6 +158,35 @@ def build_causal_features(
             denominator = generator_gas_total.replace(0, np.nan)
             feature_values[f"feat_{column}_share"] = filled[column] / denominator
 
+    if all(column in filled for column in generator_gas_columns):
+        gas_matrix = filled[generator_gas_columns].fillna(0.0).clip(lower=0.0)
+        gas_share_matrix = gas_matrix.div(gas_matrix.sum(axis=1).replace(0, np.nan), axis=0)
+        entropy = -(gas_share_matrix * np.log(gas_share_matrix.clip(lower=1e-12))).sum(axis=1)
+        dominant = gas_matrix.to_numpy().argmax(axis=1)
+        dominant_series = pd.Series(dominant, index=filled.index, dtype="int8")
+        dominant_changed = dominant_series.ne(dominant_series.shift(1))
+        dominant_changed.iloc[0] = False
+        switch_groups = dominant_changed.cumsum()
+        feature_values["feat_gas_mix_entropy"] = entropy
+        feature_values["feat_dominant_gas_type"] = dominant_series
+        feature_values["feat_dominant_gas_changed"] = dominant_changed.astype("int8")
+        feature_values["feat_steps_since_gas_switch"] = dominant_changed.groupby(
+            switch_groups
+        ).cumcount().astype("int32")
+
+        blast = filled["generator_use_blast_furnace_gas"]
+        coke = filled["generator_use_coke_gas"]
+        converter = filled["generator_use_converter_gas"]
+        feature_values["feat_coke_down_blast_up"] = (
+            (coke < coke.shift(1)) & (blast > blast.shift(1))
+        ).astype("int8")
+        feature_values["feat_coke_up_blast_down"] = (
+            (coke > coke.shift(1)) & (blast < blast.shift(1))
+        ).astype("int8")
+        feature_values["feat_converter_down_blast_up"] = (
+            (converter < converter.shift(1)) & (blast > blast.shift(1))
+        ).astype("int8")
+
     history_series: dict[str, tuple[pd.Series, bool]] = {}
     for target in ("generator_1", "generator_all"):
         if target in filled:
@@ -202,23 +239,30 @@ def build_causal_features(
         feature_values["feat_steps_to_price_switch"] = first_change.astype("int8")
 
     output = pd.DataFrame(feature_values, index=frame.index)
-    return output.replace([np.inf, -np.inf], np.nan)
+    output = output.replace([np.inf, -np.inf], np.nan)
+    audit_feature_availability(list(output.columns))
+    return output
 
 
-def build_delta_targets(
-    frame: pd.DataFrame,
-    targets: tuple[str, ...],
-    horizons: tuple[int, ...],
-) -> pd.DataFrame:
-    """构造直接多步绝对增量标签，仅供训练与离线评分使用。"""
+def audit_feature_availability(columns: list[str]) -> dict[str, FeatureAvailability]:
+    """登记特征最大信息时间，并拒绝未知生产变量的未来偏移。"""
 
-    labels: dict[str, pd.Series] = {}
-    for target in targets:
-        current = frame[target]
-        for horizon in horizons:
-            labels[f"{target}_tplus_{15 * horizon}"] = current.shift(-horizon) - current
-    return pd.DataFrame(labels, index=frame.index)
+    metadata: dict[str, FeatureAvailability] = {}
+    for column in columns:
+        if column.startswith("feat_target_price_tplus_"):
+            minutes = int(column.rsplit("_", 1)[-1])
+            metadata[column] = FeatureAvailability(minutes, known_in_advance=True)
+        elif "_lag_" in column:
+            steps = int(column.rsplit("_", 1)[-1])
+            metadata[column] = FeatureAvailability(-15 * steps)
+        else:
+            metadata[column] = FeatureAvailability(0)
 
-
-def target_columns(target: str, horizons: tuple[int, ...]) -> list[str]:
-    return [f"{target}_tplus_{15 * horizon}" for horizon in horizons]
+    violations = [
+        column
+        for column, item in metadata.items()
+        if item.max_offset_minutes > 0 and not item.known_in_advance
+    ]
+    if violations:
+        raise ValueError(f"发现未知未来生产特征: {violations}")
+    return metadata

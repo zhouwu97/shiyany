@@ -13,7 +13,8 @@
 | P0 仓库与契约 | Python 包、依赖、四表发现、时间对齐、审计 | 能识别真实四表；补齐 15 分钟网格；结构性空列可追溯 | `chore: initialize repository and data contract` |
 | P1 V1 基线 | 因果清洗、负荷/煤气时序特征、绝对增量 Ridge、持续性融合 | 合成测试通过；真实数据可训练；预测列和行数合法 | `feat: add causal ridge forecasting baseline` |
 | P2 V2 增强 | 煤气供需代理、气柜、煤气隐含负荷、近期模型、LightGBM 残差 | 多数滚动折不劣于 V1；失败时自动回退 V1 | `feat: add gas-aware residual ensemble` |
-| P3 V3 冲分 | GMM 状态、升/稳/降概率、动态软门控、分歧收缩 | 盲折及多数开发折优于 V2 才可选为提交模型 | `feat: add state-aware dynamic gating` |
+| P2.5 稳健候选 | `generator_rest` 状态、煤气切换事件、连续线性门控 | 平均与多数折优于 V2；失败时回退 V2 | `feat: add low-complexity continuous gating` |
+| P3 V3 冲分 | GMM 状态、升/稳/降概率、动态软门控、分歧收缩 | 盲折及多数开发折优于 V2.5 才可选为提交模型 | `feat: add state-aware dynamic gating` |
 | P4 交付 | 滚动验证、训练/推理 CLI、提交校验、说明文档 | 一条命令产出合法宽表；未来扰动测试严格不变 | `docs: finalize reproducible competition workflow` |
 
 每个阶段执行 `pytest -q` 和对应真实数据 smoke run 后再提交，并立即推送 `main`。后一阶段出现问题时，前一提交仍是可运行保底版本。
@@ -51,6 +52,13 @@
 - 逻辑回归门控学习“修正是否显著优于持续性”，输出软概率而非硬切换。
 - 模型分歧越大，最终预测越向持续性锚点收缩。
 
+### V2.5
+
+- 对 `generator_rest = generator_all - generator_1` 在每折开发段用 BIC 从 2 至 5 个 GMM 成分中选择状态结构。
+- 增加主导气种变化、切换时距、煤气份额熵和交叉升降事件；所有事件只由当前及历史构造。
+- 门控目标为严格 OOF 的最优融合系数，采用强正则 Ridge 回归并限制到 `[0.05, 0.70]`。
+- 分支分歧使用 MAD，在校准段按目标与步长估计 70%/95% 分位并连续回缩。
+
 ## 5. 验证与防泄漏
 
 - 3 月下旬至 4 月底每 2 天一个验证起点，每折覆盖 2 天；最后 4 天为盲折。
@@ -73,4 +81,3 @@ python scripts/validate_submission.py --input submissions/s_result.csv
 ```
 
 `auto` 只依据训练期滚动验证选择版本，绝不读取测试期未来真实值。V3 未同时通过盲折与多数折胜率时，自动提交 V2；V2 未通过时回退 V1。
-

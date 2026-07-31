@@ -5,7 +5,8 @@ import pandas as pd
 import pytest
 
 from gas_forecast.config import FeatureConfig
-from gas_forecast.features import build_causal_features, build_delta_targets
+from gas_forecast.features import audit_feature_availability, build_causal_features
+from gas_forecast.targets import build_delta_targets
 
 
 def _frame(rows: int = 120) -> pd.DataFrame:
@@ -50,3 +51,10 @@ def test_delta_targets_are_direct_horizon_differences() -> None:
     labels = build_delta_targets(frame, ("generator_1",), (1, 8))
     assert labels.iloc[0]["generator_1_tplus_15"] == pytest.approx(0.1)
     assert labels.iloc[0]["generator_1_tplus_120"] == pytest.approx(0.8)
+
+
+def test_only_known_price_features_may_have_positive_information_offset() -> None:
+    columns = ["generator_1", "feat_generator_1_lag_4", "feat_target_price_tplus_120"]
+    metadata = audit_feature_availability(columns)
+    assert metadata["feat_generator_1_lag_4"].max_offset_minutes == -60
+    assert metadata["feat_target_price_tplus_120"].known_in_advance is True

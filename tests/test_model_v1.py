@@ -4,8 +4,9 @@ import numpy as np
 import pandas as pd
 
 from gas_forecast.config import FeatureConfig, ForecastConfig
-from gas_forecast.features import build_causal_features, build_delta_targets
+from gas_forecast.features import build_causal_features
 from gas_forecast.model_v1 import RidgeDeltaForecaster
+from gas_forecast.targets import build_delta_targets
 
 
 def test_v1_predicts_complete_constrained_wide_table() -> None:
@@ -34,4 +35,3 @@ def test_v1_predicts_complete_constrained_wide_table() -> None:
             predicted[f"generator_all_t+{15 * horizon}_pred"]
             >= predicted[f"generator_1_t+{15 * horizon}_pred"]
         ).all()
-

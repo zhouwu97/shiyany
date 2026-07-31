@@ -48,4 +48,34 @@ pytest -q
 python scripts/audit_data.py --data-dir "data/raw/official/初赛-参赛者使用"
 ```
 
+## 训练、预测与提交
+
+```powershell
+# 先用训练期滚动报告选择版本；当前真实盲折默认选择 V2
+python scripts/train.py --data-dir "data/raw/official/初赛-参赛者使用" --version v2 --output artifacts/model.joblib
+
+python scripts/predict.py `
+  --train-dir "data/raw/official/初赛-参赛者使用" `
+  --test-dir "data/raw/scoring/初赛-评分所用测试集" `
+  --model artifacts/model.joblib `
+  --output-dir submissions/final
+
+python scripts/validate_submission.py --input submissions/final/s_result.csv
+python scripts/package_submission.py `
+  --input submissions/final/s_result.csv `
+  --output submissions/teamname_gas_predict_prelim.zip
+```
+
+若平台仍要求数据字典中的旧版 JSON，可单独执行：
+
+```powershell
+python scripts/export_json.py --input submissions/final/s_result.csv --output submissions/final/result_legacy.json
+```
+
+不要把 CSV 和 JSON 同时放进正式提交包；优先级为平台当前模板、最新官方答疑、PDF 提交规范、数据包旧说明。
+
+## 测试集隔离
+
+测试期每一行只能在该行对应的滚动起点作为当前输入使用，后续行不能进入当前预测。不得根据测试集未来真实值反推模型、阈值、融合权重或版本。若需要本地查看测试得分，必须先冻结预测文件，再运行独立的 `scripts/evaluate_frozen.py`；该结果只用于最终评估，不得反馈到训练过程。
+
 完整阶段、验收标准和分段提交设计见 [实施计划](docs/IMPLEMENTATION_PLAN.md)。实验结论与路线裁决分别记录在 [RESULTS_REPORT.md](RESULTS_REPORT.md) 和 [DECISIONS.md](DECISIONS.md)。

@@ -11,11 +11,11 @@ from gas_forecast.config import ForecastConfig
 from gas_forecast.data import align_tables, combine_context
 from gas_forecast.features import (
     build_causal_features,
-    build_delta_targets,
     load_price_schedule,
 )
 from gas_forecast.model_v1 import RidgeDeltaForecaster
 from gas_forecast.model_ensemble import GasAwareEnsembleForecaster
+from gas_forecast.targets import build_delta_targets
 
 
 def _find_price(data_dir: str | Path) -> Path | None:

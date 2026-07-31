@@ -8,9 +8,9 @@ import numpy as np
 import pandas as pd
 
 from gas_forecast.config import ForecastConfig
-from gas_forecast.features import build_delta_targets
 from gas_forecast.model_ensemble import GasAwareEnsembleForecaster
 from gas_forecast.model_v1 import RidgeDeltaForecaster
+from gas_forecast.targets import build_delta_targets
 
 
 @dataclass(frozen=True)

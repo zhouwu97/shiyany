@@ -5,11 +5,12 @@ import pandas as pd
 import pytest
 
 from gas_forecast.config import FeatureConfig, ForecastConfig, ModelConfig
-from gas_forecast.features import build_causal_features, build_delta_targets
+from gas_forecast.features import build_causal_features
 from gas_forecast.model_ensemble import GasAwareEnsembleForecaster
+from gas_forecast.targets import build_delta_targets
 
 
-@pytest.mark.parametrize("version", ["v2", "v3"])
+@pytest.mark.parametrize("version", ["v2", "v25", "v3"])
 def test_enhanced_models_produce_finite_predictions(version: str) -> None:
     rows = 520
     index = pd.date_range("2025-01-01", periods=rows, freq="15min")
@@ -45,4 +46,3 @@ def test_enhanced_models_produce_finite_predictions(version: str) -> None:
 
     assert predicted.shape == (12, 4)
     assert np.isfinite(predicted.to_numpy()).all()
-

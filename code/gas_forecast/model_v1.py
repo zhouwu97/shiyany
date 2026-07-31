@@ -13,7 +13,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from gas_forecast.config import ForecastConfig
-from gas_forecast.features import target_columns
+from gas_forecast.targets import target_columns
 
 
 def _mape(actual: np.ndarray, predicted: np.ndarray) -> float:

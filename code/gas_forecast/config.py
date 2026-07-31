@@ -24,7 +24,6 @@ class ModelConfig:
     ridge_alpha: float = 20.0
     recent_days: int = 60
     calibration_fraction: float = 0.15
-    gate_margin: float = 0.25
     random_state: int = 20250731
     lower_quantile: float = 0.001
     upper_quantile: float = 0.999
@@ -32,7 +31,10 @@ class ModelConfig:
     lgb_num_leaves: int = 15
     lgb_max_depth: int = 5
     state_components: int = 5
-    uncertainty_scale: float = 0.05
+    gate_min: float = 0.05
+    gate_max: float = 0.70
+    generator_1_max_shrink: float = 0.60
+    generator_all_max_shrink: float = 0.40
 
 
 @dataclass(frozen=True)

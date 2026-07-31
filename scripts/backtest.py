@@ -15,7 +15,7 @@ from gas_forecast.validation import backtest_model
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="运行短周期预测滚动验证")
     parser.add_argument("--data-dir", type=Path, required=True)
-    parser.add_argument("--version", choices=["v1", "v2", "v3"], default="v1")
+    parser.add_argument("--version", choices=["v1", "v2", "v25", "v3"], default="v1")
     parser.add_argument("--max-folds", type=int)
     parser.add_argument("--output", type=Path, default=Path("results/raw/backtest_v1.json"))
     return parser.parse_args()
