@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from gas_forecast.freeze import compare_reproductions
 from gas_forecast.submission import (
     expected_prediction_columns,
     export_legacy_json,
@@ -39,6 +40,10 @@ def test_submission_validation_and_archive_contract(tmp_path: Path) -> None:
     with zipfile.ZipFile(archive_path) as archive:
         assert archive.namelist() == ["result.csv"]
 
+    first_bytes = archive_path.read_bytes()
+    package_submission(result_path, archive_path)
+    assert archive_path.read_bytes() == first_bytes
+
     json_path = tmp_path / "legacy.json"
     export_legacy_json(result_path, json_path)
     assert '"columns"' in json_path.read_text(encoding="utf-8")
@@ -49,3 +54,21 @@ def test_submission_rejects_non_finite_prediction() -> None:
     frame.loc[0, "generator_1_t+15_pred"] = np.nan
     with pytest.raises(ValueError, match="非有限值"):
         validate_submission_frame(frame)
+
+
+def test_reproduction_comparison_requires_all_frozen_fields() -> None:
+    manifest = {
+        "model_version": "v2",
+        "model_sha256": "a",
+        "result_sha256": "b",
+        "zip_sha256": "c",
+        "zip_result_sha256": "d",
+        "selection_sha256": "e",
+        "requirements_lock_sha256": "f",
+        "rows": 192,
+        "prediction_columns": 16,
+        "archive_members": ["result.csv"],
+    }
+    assert compare_reproductions(manifest, manifest)["identical"] is True
+    changed = {**manifest, "zip_sha256": "different"}
+    assert compare_reproductions(manifest, changed)["identical"] is False

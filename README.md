@@ -22,6 +22,13 @@ python -m pip install -r requirements.txt
 python -m pip install -e .
 ```
 
+最终复现使用锁定依赖：
+
+```powershell
+python -m pip install -r requirements-lock.txt
+python -m pip install --no-deps .
+```
+
 ## 数据目录
 
 将官方文件解压到下列目录，文件名前缀可以是 `Pre_` 或 `Pre_test_`：
@@ -64,6 +71,14 @@ python scripts/validate_submission.py --input submissions/final/s_result.csv
 python scripts/package_submission.py `
   --input submissions/final/s_result.csv `
   --output submissions/teamname_gas_predict_prelim.zip
+```
+
+完整 20 折验证与冻结：
+
+```powershell
+python scripts/backtest.py --data-dir "data/raw/official/初赛-参赛者使用" --version v1 --jobs 4 --output results/raw/backtest_v1_20fold.json
+python scripts/backtest.py --data-dir "data/raw/official/初赛-参赛者使用" --version v2 --jobs 4 --output results/raw/backtest_v2_20fold.json
+python scripts/select_model.py --v1 results/raw/backtest_v1_20fold.json --v2 results/raw/backtest_v2_20fold.json --output results/raw/model_selection_20fold.json
 ```
 
 若平台仍要求数据字典中的旧版 JSON，可单独执行：

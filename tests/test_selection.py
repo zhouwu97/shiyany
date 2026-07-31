@@ -6,7 +6,23 @@ def _report(version: str, values: list[float]) -> dict[str, object]:
     return {
         "version": version,
         "mean_mape": sum(values) / len(values),
-        "folds": [{"name": name, "mape": value} for name, value in zip(names, values)],
+        "folds": [
+            {
+                "name": name,
+                "mape": value,
+                "validation_start": (
+                    "2025-04-17 00:00:00" if name == "dev_02" else "2025-04-01 00:00:00"
+                ),
+                "validation_end": (
+                    "2025-04-19 00:00:00" if name == "dev_02" else "2025-04-03 00:00:00"
+                ),
+                "by_target_horizon": {
+                    "generator_1_t+15": value,
+                    "generator_all_t+15": value,
+                },
+            }
+            for name, value in zip(names, values)
+        ],
     }
 
 

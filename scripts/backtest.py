@@ -17,6 +17,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-dir", type=Path, required=True)
     parser.add_argument("--version", choices=["v1", "v2", "v25", "v3"], default="v1")
     parser.add_argument("--max-folds", type=int)
+    parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument("--output", type=Path, default=Path("results/raw/backtest_v1.json"))
     return parser.parse_args()
 
@@ -29,7 +30,12 @@ def main() -> None:
     price = load_price_schedule(price_paths[0]) if price_paths else None
     features = build_causal_features(dataset.frame, config.feature, price)
     result = backtest_model(
-        dataset.frame, features, args.version, config, max_folds=args.max_folds
+        dataset.frame,
+        features,
+        args.version,
+        config,
+        max_folds=args.max_folds,
+        n_jobs=args.jobs,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

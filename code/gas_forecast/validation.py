@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 
 import numpy as np
 import pandas as pd
+from joblib import Parallel, delayed
 
 from gas_forecast.config import ForecastConfig
 from gas_forecast.model_ensemble import GasAwareEnsembleForecaster
@@ -64,15 +65,14 @@ def backtest_model(
     config: ForecastConfig | None = None,
     *,
     max_folds: int | None = None,
+    n_jobs: int = 1,
 ) -> dict[str, object]:
     config = config or ForecastConfig()
     deltas = build_delta_targets(frame, config.targets, config.feature.horizons)
     folds = make_rolling_folds(frame.index, config)
     if max_folds is not None:
         folds = folds[-max_folds:]
-    fold_results: list[dict[str, object]] = []
-
-    for fold in folds:
+    def evaluate_fold(fold: RollingFold) -> dict[str, object]:
         train_mask = features.index < fold.train_end
         validation_mask = (features.index >= fold.validation_start) & (
             features.index < fold.validation_end
@@ -107,17 +107,52 @@ def backtest_model(
                     actual.loc[valid].to_numpy(),
                     frame.loc[validation_mask, target].loc[valid].to_numpy(),
                 )
-        fold_results.append(
-            {
-                **asdict(fold),
-                "validation_start": str(fold.validation_start),
-                "validation_end": str(fold.validation_end),
-                "train_end": str(fold.train_end),
-                "mape": float(np.mean(list(scores.values()))),
-                "persistence_mape": float(np.mean(list(persistence_scores.values()))),
-                "by_target_horizon": scores,
-            }
+        return {
+            **asdict(fold),
+            "validation_start": str(fold.validation_start),
+            "validation_end": str(fold.validation_end),
+            "train_end": str(fold.train_end),
+            "mape": float(np.mean(list(scores.values()))),
+            "persistence_mape": float(np.mean(list(persistence_scores.values()))),
+            "by_target_horizon": scores,
+            "persistence_by_target_horizon": persistence_scores,
+        }
+
+    if n_jobs == 1:
+        fold_results = [evaluate_fold(fold) for fold in folds]
+    else:
+        fold_results = Parallel(n_jobs=n_jobs, verbose=10)(
+            delayed(evaluate_fold)(fold) for fold in folds
         )
+
+    by_target = {}
+    by_horizon = {}
+    for target in config.targets:
+        target_values = [
+            fold["by_target_horizon"][key]
+            for fold in fold_results
+            for key in fold["by_target_horizon"]
+            if key.startswith(f"{target}_")
+        ]
+        by_target[target] = float(np.mean(target_values))
+    for horizon in config.feature.horizons:
+        suffix = f"_t+{15 * horizon}"
+        horizon_values = [
+            fold["by_target_horizon"][key]
+            for fold in fold_results
+            for key in fold["by_target_horizon"]
+            if key.endswith(suffix)
+        ]
+        by_horizon[f"t+{15 * horizon}"] = float(np.mean(horizon_values))
+    worst = max(fold_results, key=lambda item: item["mape"])
+    switch_fold = next(
+        (
+            fold
+            for fold in fold_results
+            if fold["validation_start"] <= "2025-04-18 00:00:00" < fold["validation_end"]
+        ),
+        None,
+    )
 
     return {
         "version": version,
@@ -127,6 +162,10 @@ def backtest_model(
             np.mean([item["persistence_mape"] for item in fold_results])
         ),
         "wins": int(sum(item["mape"] < item["persistence_mape"] for item in fold_results)),
+        "by_target": by_target,
+        "by_horizon": by_horizon,
+        "worst_fold": {"name": worst["name"], "mape": worst["mape"]},
+        "switch_period": switch_fold,
     }
 
 
@@ -136,5 +175,8 @@ def backtest_v1(
     config: ForecastConfig | None = None,
     *,
     max_folds: int | None = None,
+    n_jobs: int = 1,
 ) -> dict[str, object]:
-    return backtest_model(frame, features, "v1", config, max_folds=max_folds)
+    return backtest_model(
+        frame, features, "v1", config, max_folds=max_folds, n_jobs=n_jobs
+    )

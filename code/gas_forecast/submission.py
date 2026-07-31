@@ -78,7 +78,16 @@ def package_submission(
     destination = Path(output_zip)
     destination.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("result.csv", buffer.getvalue().encode("utf-8"))
+        info = zipfile.ZipInfo("result.csv", date_time=(1980, 1, 1, 0, 0, 0))
+        info.compress_type = zipfile.ZIP_DEFLATED
+        info.create_system = 3
+        info.external_attr = 0o100644 << 16
+        archive.writestr(
+            info,
+            buffer.getvalue().encode("utf-8"),
+            compress_type=zipfile.ZIP_DEFLATED,
+            compresslevel=9,
+        )
     summary["archive"] = str(destination)
     return summary
 
