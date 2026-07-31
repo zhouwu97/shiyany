@@ -9,6 +9,7 @@ import pandas as pd
 
 from gas_forecast.config import ForecastConfig
 from gas_forecast.features import build_delta_targets
+from gas_forecast.model_ensemble import GasAwareEnsembleForecaster
 from gas_forecast.model_v1 import RidgeDeltaForecaster
 
 
@@ -56,9 +57,10 @@ def mape(actual: np.ndarray, predicted: np.ndarray) -> float:
     return float(np.mean(np.abs(actual - predicted) / denominator))
 
 
-def backtest_v1(
+def backtest_model(
     frame: pd.DataFrame,
     features: pd.DataFrame,
+    version: str,
     config: ForecastConfig | None = None,
     *,
     max_folds: int | None = None,
@@ -75,7 +77,11 @@ def backtest_v1(
         validation_mask = (features.index >= fold.validation_start) & (
             features.index < fold.validation_end
         )
-        model = RidgeDeltaForecaster(config).fit(
+        model = (
+            RidgeDeltaForecaster(config)
+            if version == "v1"
+            else GasAwareEnsembleForecaster(version, config)
+        ).fit(
             features.loc[train_mask],
             deltas.loc[train_mask],
             frame.loc[train_mask, list(config.targets)],
@@ -114,7 +120,7 @@ def backtest_v1(
         )
 
     return {
-        "version": "v1",
+        "version": version,
         "folds": fold_results,
         "mean_mape": float(np.mean([item["mape"] for item in fold_results])),
         "mean_persistence_mape": float(
@@ -123,3 +129,12 @@ def backtest_v1(
         "wins": int(sum(item["mape"] < item["persistence_mape"] for item in fold_results)),
     }
 
+
+def backtest_v1(
+    frame: pd.DataFrame,
+    features: pd.DataFrame,
+    config: ForecastConfig | None = None,
+    *,
+    max_folds: int | None = None,
+) -> dict[str, object]:
+    return backtest_model(frame, features, "v1", config, max_folds=max_folds)

@@ -15,6 +15,7 @@ from gas_forecast.features import (
     load_price_schedule,
 )
 from gas_forecast.model_v1 import RidgeDeltaForecaster
+from gas_forecast.model_ensemble import GasAwareEnsembleForecaster
 
 
 def _find_price(data_dir: str | Path) -> Path | None:
@@ -22,14 +23,22 @@ def _find_price(data_dir: str | Path) -> Path | None:
     return matches[0] if matches else None
 
 
-def train_v1(data_dir: str | Path, output: str | Path) -> RidgeDeltaForecaster:
+def train_model(
+    data_dir: str | Path,
+    output: str | Path,
+    version: str = "v1",
+) -> RidgeDeltaForecaster | GasAwareEnsembleForecaster:
     config = ForecastConfig()
     dataset = align_tables(data_dir, config.feature.frequency)
     price_path = _find_price(data_dir)
     price = load_price_schedule(price_path) if price_path else None
     features = build_causal_features(dataset.frame, config.feature, price)
     deltas = build_delta_targets(dataset.frame, config.targets, config.feature.horizons)
-    model = RidgeDeltaForecaster(config).fit(
+    model = (
+        RidgeDeltaForecaster(config)
+        if version == "v1"
+        else GasAwareEnsembleForecaster(version, config)
+    ).fit(
         features,
         deltas,
         dataset.frame.loc[:, list(config.targets)],
@@ -40,12 +49,16 @@ def train_v1(data_dir: str | Path, output: str | Path) -> RidgeDeltaForecaster:
     return model
 
 
+def train_v1(data_dir: str | Path, output: str | Path) -> RidgeDeltaForecaster:
+    return train_model(data_dir, output, "v1")
+
+
 def predict_rolling(
     train_dir: str | Path,
     test_dir: str | Path,
     model_path: str | Path,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    model: RidgeDeltaForecaster = joblib.load(model_path)
+    model: RidgeDeltaForecaster | GasAwareEnsembleForecaster = joblib.load(model_path)
     train = align_tables(train_dir, model.config.feature.frequency).frame
     test = align_tables(test_dir, model.config.feature.frequency).frame
     context = combine_context(train, test)
@@ -58,4 +71,3 @@ def predict_rolling(
         test_features.loc[:, list(model.config.targets)],
     )
     return test_features, predictions
-

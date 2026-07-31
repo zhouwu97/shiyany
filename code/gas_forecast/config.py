@@ -28,6 +28,11 @@ class ModelConfig:
     random_state: int = 20250731
     lower_quantile: float = 0.001
     upper_quantile: float = 0.999
+    lgb_n_estimators: int = 160
+    lgb_num_leaves: int = 15
+    lgb_max_depth: int = 5
+    state_components: int = 5
+    uncertainty_scale: float = 0.05
 
 
 @dataclass(frozen=True)
@@ -49,4 +54,3 @@ class ForecastConfig:
     feature: FeatureConfig = field(default_factory=FeatureConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     validation: ValidationConfig = field(default_factory=ValidationConfig)
-

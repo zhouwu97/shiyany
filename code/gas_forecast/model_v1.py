@@ -21,7 +21,7 @@ def _mape(actual: np.ndarray, predicted: np.ndarray) -> float:
     return float(np.mean(np.abs(actual - predicted) / denominator))
 
 
-def _ridge_pipeline(alpha: float) -> Pipeline:
+def make_ridge_pipeline(alpha: float) -> Pipeline:
     return Pipeline(
         [
             ("imputer", SimpleImputer(strategy="median", keep_empty_features=True)),
@@ -73,7 +73,7 @@ class RidgeDeltaForecaster:
             calibration_rows = max(96, int(len(x) * self.config.model.calibration_fraction))
             calibration_start = len(x) - calibration_rows
             development_end = max(100, calibration_start - max_horizon)
-            initial = _ridge_pipeline(self.config.model.ridge_alpha)
+            initial = make_ridge_pipeline(self.config.model.ridge_alpha)
             initial.fit(x.iloc[:development_end], y.iloc[:development_end])
 
             calibration_x = x.iloc[calibration_start:]
@@ -98,7 +98,7 @@ class RidgeDeltaForecaster:
                 np.arange(len(columns)), raw_weights
             )
 
-            final_model = _ridge_pipeline(self.config.model.ridge_alpha)
+            final_model = make_ridge_pipeline(self.config.model.ridge_alpha)
             final_model.fit(x, y)
             lower = y.quantile(self.config.model.lower_quantile).to_numpy()
             upper = y.quantile(self.config.model.upper_quantile).to_numpy()
@@ -139,4 +139,3 @@ class RidgeDeltaForecaster:
             output[generator_all] = np.maximum(output[generator_all], output[generator_1])
         if not np.isfinite(output.to_numpy()).all():
             raise ValueError("预测结果包含非有限值")
-
