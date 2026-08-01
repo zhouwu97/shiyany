@@ -5,12 +5,13 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 import time
+from typing import Mapping
 
 import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed
 
-from gas_forecast.config import ForecastConfig, research_feature_superset
+from gas_forecast.config import ForecastConfig, legacy_forecast_config, research_feature_superset
 from gas_forecast.features import PriceSchedule, build_causal_features
 from gas_forecast.oof import _base_fold_rows
 from gas_forecast.online import (
@@ -18,7 +19,11 @@ from gas_forecast.online import (
     apply_online_calibration_hot_start_pipeline,
 )
 from gas_forecast.regimes import attach_regimes
-from gas_forecast.scoring import absolute_percentage_error, score_oof_long
+from gas_forecast.scoring import (
+    absolute_percentage_error,
+    block_bootstrap_improvement_probability,
+    score_oof_long,
+)
 from gas_forecast.splits import TimeFold, make_outer_folds
 from gas_forecast.targets import build_delta_targets
 
@@ -34,6 +39,7 @@ class ResearchCandidate:
     description: str
     online_mode: str | None = None
     online_modes: tuple[str, ...] = ()
+    route: dict[str, object] | None = None
 
 
 def _base_research_config(config: ForecastConfig) -> ForecastConfig:
@@ -62,6 +68,7 @@ def _candidate(
     *,
     online_mode: str | None = None,
     online_modes: tuple[str, ...] = (),
+    route: dict[str, object] | None = None,
 ) -> ResearchCandidate:
     return ResearchCandidate(
         experiment_id=experiment_id,
@@ -71,6 +78,7 @@ def _candidate(
         description=description,
         online_mode=online_mode,
         online_modes=online_modes,
+        route=route,
     )
 
 
@@ -306,6 +314,26 @@ def filter_research_candidate_names(
     return selected
 
 
+def make_formal_routed_candidate(
+    route: Mapping[str, object],
+    *,
+    name: str = "formal_routed_champion",
+    config: ForecastConfig | None = None,
+) -> ResearchCandidate:
+    """登记当前正式 V2/V3 冻结路由，供 challenger 作同口径复核。"""
+
+    if "global" not in route:
+        raise ValueError("正式 routed champion 缺少 global 路由")
+    return _candidate(
+        "M1_formal_routed",
+        name,
+        "formal_routed",
+        config or legacy_forecast_config(),
+        "当前正式 V2/V3 冻结路由与容量约束",
+        route=dict(route),
+    )
+
+
 def make_online_combination_candidate(
     config: ForecastConfig,
     modes: tuple[str, ...],
@@ -371,6 +399,14 @@ class ResearchOOFResult:
 
 def make_research_model(candidate: ResearchCandidate):
     """将注册候选解析为可训练模型；在线候选先返回其静态基础模型。"""
+
+    if candidate.kind == "formal_routed":
+        from gas_forecast.model_routed import RoutedLegacyForecaster
+
+        if candidate.route is None:
+            raise ValueError("正式 routed candidate 必须提供冻结路由")
+        # 外层折已可并行；此处禁用嵌套并行，确保复核资源配额可预测。
+        return RoutedLegacyForecaster(candidate.route, candidate.config, n_jobs=1)
 
     from gas_forecast.research_models import (
         DirectIncrementalBlendForecaster,
@@ -664,44 +700,101 @@ def _candidate_comparison(
 
     report = score_oof_long(rows, prediction_column)
     if prediction_column == baseline_column:
-        comparison = rows.loc[:, ["fold", "origin_time", "actual", prediction_column]].copy()
-        comparison["difference"] = 0.0
+        comparison = rows.loc[
+            :, ["fold", "origin_time", "target", "horizon", "actual", prediction_column]
+        ].copy()
+        comparison[baseline_column] = comparison[prediction_column]
     else:
         comparison = rows.loc[
-            :, ["fold", "origin_time", "actual", prediction_column, baseline_column]
+            :,
+            [
+                "fold",
+                "origin_time",
+                "target",
+                "horizon",
+                "actual",
+                prediction_column,
+                baseline_column,
+            ],
         ].copy()
-        candidate_error = absolute_percentage_error(comparison["actual"], comparison[prediction_column])
-        baseline_error = absolute_percentage_error(comparison["actual"], comparison[baseline_column])
-        comparison["difference"] = candidate_error - baseline_error
+    comparison["candidate_ape"] = absolute_percentage_error(
+        comparison["actual"], comparison[prediction_column]
+    )
+    comparison["baseline_ape"] = absolute_percentage_error(
+        comparison["actual"], comparison[baseline_column]
+    )
+    comparison = comparison.dropna(subset=["candidate_ape", "baseline_ape"])
+    comparison["difference"] = comparison["candidate_ape"] - comparison["baseline_ape"]
+
+    def pairwise_summary(part: pd.DataFrame) -> dict[str, float]:
+        return {
+            "candidate_mape": float(part["candidate_ape"].mean()),
+            "baseline_mape": float(part["baseline_ape"].mean()),
+            "difference": float(part["difference"].mean()),
+        }
+
+    def grouped_pairwise(column: str, formatter) -> dict[str, dict[str, float]]:
+        return {
+            formatter(key): pairwise_summary(part)
+            for key, part in comparison.groupby(column, sort=True)
+        }
+
+    pairwise = {
+        "pooled": pairwise_summary(comparison),
+        "by_target": grouped_pairwise("target", str),
+        "by_horizon": grouped_pairwise("horizon", lambda value: f"t+{int(value)}"),
+        "by_fold": grouped_pairwise("fold", str),
+    }
     by_fold = comparison.groupby("fold", sort=True)["difference"].mean()
     by_day = comparison.assign(day=pd.to_datetime(comparison["origin_time"]).dt.date).groupby(
         "day", sort=True
     )["difference"].mean()
     recent = by_fold.tail(5)
-    generator_rows = rows.loc[rows["target"] == "generator_1"]
-    generator_difference = absolute_percentage_error(
-        generator_rows["actual"], generator_rows[prediction_column]
-    ) - absolute_percentage_error(generator_rows["actual"], generator_rows[baseline_column])
-    pooled_difference = float(comparison["difference"].mean())
+    generator_difference = comparison.loc[
+        comparison["target"] == "generator_1", "difference"
+    ]
+    pooled_difference = float(pairwise["pooled"]["difference"])
+    blind = pairwise["by_fold"].get("blind")
+    blind_difference = float(blind["difference"]) if blind is not None else float("nan")
+    day_block_bootstrap = block_bootstrap_improvement_probability(
+        comparison,
+        prediction_column,
+        baseline_column,
+    )
+    development = comparison.loc[comparison["fold"].ne("blind")]
+    development_day_block_bootstrap = block_bootstrap_improvement_probability(
+        development,
+        prediction_column,
+        baseline_column,
+    )
+    fold_wins = int((by_fold < 0.0).sum())
     formal = (
         scope == "final"
         and pooled_difference < 0.0
         and float(generator_difference.mean()) <= 0.0
-        and int((by_fold < 0.0).sum()) >= int(np.ceil(len(by_fold) / 2))
+        and fold_wins > len(by_fold) / 2
         and float(by_fold.max()) <= 0.001
+        and np.isfinite(blind_difference)
+        and blind_difference <= 0.0
+        and float(day_block_bootstrap["probability_candidate_better"]) >= 0.5
     )
     research = pooled_difference <= -0.00005 and float(generator_difference.mean()) <= 0.0
     return {
         **report,
         "baseline_column": baseline_column,
+        "pairwise": pairwise,
         "pooled_difference": pooled_difference,
         "generator_1_difference": float(generator_difference.mean()),
-        "fold_wins": int((by_fold < 0.0).sum()),
+        "fold_wins": fold_wins,
         "day_block_wins": int((by_day < 0.0).sum()),
         "recent_5_folds_difference": {
             str(name): float(value) for name, value in recent.items()
         },
         "worst_fold_regression": float(by_fold.max()),
+        "blind": blind,
+        "blind_difference": blind_difference,
+        "day_block_bootstrap": day_block_bootstrap,
+        "development_day_block_bootstrap": development_day_block_bootstrap,
         "research_candidate": bool(research),
         "formal_candidate": bool(formal),
         "next_action": (
@@ -793,15 +886,20 @@ def build_research_oof(
     # Alpha、损失权重等消融会共享同一特征配置；缓存可避免重复计算长窗口特征。
     feature_cache: dict[object, pd.DataFrame] = {}
 
-    def resolve_features(config: ForecastConfig) -> pd.DataFrame:
-        feature_config = research_feature_superset(config.feature)
+    def resolve_features(candidate: ResearchCandidate) -> pd.DataFrame:
+        # 正式 champion 必须使用其原始 legacy 特征，不能被研究超集静默改变。
+        feature_config = (
+            candidate.config.feature
+            if candidate.kind == "formal_routed"
+            else research_feature_superset(candidate.config.feature)
+        )
         cached = feature_cache.get(feature_config)
         if cached is None:
             cached = build_causal_features(frame, feature_config, price_schedule)
             feature_cache[feature_config] = cached
         return cached
 
-    base_features = resolve_features(reference)
+    base_features = resolve_features(baseline_candidate)
     row_parts = []
     for fold in folds:
         _, validation_mask = fold.masks(frame.index)
@@ -813,7 +911,7 @@ def build_research_oof(
     keys = ["fold", "origin_time", "target", "horizon"]
     row_index = pd.MultiIndex.from_frame(rows[keys])
     for candidate in candidates:
-        features = resolve_features(candidate.config)
+        features = resolve_features(candidate)
         deltas = build_delta_targets(
             frame, candidate.config.targets, candidate.config.feature.horizons
         )
@@ -901,20 +999,23 @@ def build_research_oof(
             reference.feature.horizons,
         )
     duration = time.perf_counter() - started
+    def candidate_payload(candidate: ResearchCandidate) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "experiment_id": candidate.experiment_id,
+            "kind": candidate.kind,
+            "description": candidate.description,
+            "config": asdict(candidate.config),
+        }
+        if candidate.route is not None:
+            payload["route"] = candidate.route
+        return payload
+
     report: dict[str, object] = {
         "scope": scope,
         "folds": [fold.name for fold in folds],
         "blind_included": any(fold.blind for fold in folds),
         "baseline": baseline_name,
-        "candidates": {
-            candidate.name: {
-                "experiment_id": candidate.experiment_id,
-                "kind": candidate.kind,
-                "description": candidate.description,
-                "config": asdict(candidate.config),
-            }
-            for candidate in candidates
-        },
+        "candidates": {candidate.name: candidate_payload(candidate) for candidate in candidates},
         "models": reports,
         "capacity_projection_audit": capacity_audit,
         "duration_seconds": duration,
