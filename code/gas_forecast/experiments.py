@@ -49,6 +49,84 @@ class ExperimentRecord:
 
 
 RESULTS_ROOT = Path("results")
+DEFAULT_RANDOM_SEED = 20250731
+
+
+def stable_hash(value: object) -> str:
+    """对 JSON 可序列化对象生成稳定 SHA256。"""
+
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def dataframe_fingerprint(frame: pd.DataFrame) -> str:
+    """同时覆盖字段结构、索引和数值内容的数据指纹。"""
+
+    metadata = {
+        "columns": [str(column) for column in frame.columns],
+        "dtypes": [str(dtype) for dtype in frame.dtypes],
+        "index_name": str(frame.index.name),
+        "index_dtype": str(frame.index.dtype),
+        "shape": [int(frame.shape[0]), int(frame.shape[1])],
+    }
+    digest = hashlib.sha256(json.dumps(metadata, sort_keys=True).encode("utf-8"))
+    values = pd.util.hash_pandas_object(frame, index=True).to_numpy(dtype="uint64")
+    digest.update(values.tobytes())
+    return digest.hexdigest()
+
+
+def feature_schema_fingerprint(features: pd.DataFrame) -> str:
+    """仅对特征 schema 生成指纹，便于 checkpoint 拒绝错列恢复。"""
+
+    return stable_hash(
+        {
+            "columns": [str(column) for column in features.columns],
+            "dtypes": [str(dtype) for dtype in features.dtypes],
+            "index_name": str(features.index.name),
+            "index_dtype": str(features.index.dtype),
+            "shape": [int(features.shape[0]), int(features.shape[1])],
+        }
+    )
+
+
+def config_fingerprint(config: object) -> str:
+    """对 dataclass 或普通配置对象生成稳定指纹。"""
+
+    try:
+        value = asdict(config)
+    except TypeError:
+        value = config
+    return stable_hash(value)
+
+
+def build_fingerprints(
+    *,
+    config: object | None = None,
+    dataset: pd.DataFrame | None = None,
+    features: pd.DataFrame | None = None,
+    model_params: object | None = None,
+    random_seed: int = DEFAULT_RANDOM_SEED,
+) -> dict[str, object]:
+    """构造运行和 checkpoint 共同使用的来源指纹。"""
+
+    requirements = Path("requirements-lock.txt")
+    return {
+        "config_hash": config_fingerprint(config) if config is not None else "unavailable",
+        "feature_hash": (
+            feature_schema_fingerprint(features) if features is not None else "unavailable"
+        ),
+        "dataset_hash": dataframe_fingerprint(dataset) if dataset is not None else "unavailable",
+        "requirements_hash": sha256(requirements) if requirements.exists() else "unavailable",
+        "model_params_hash": stable_hash(model_params) if model_params is not None else "unavailable",
+        "random_seed": int(random_seed),
+        "git_commit": current_commit(),
+    }
 
 
 def _run_partition(prefix: str) -> tuple[tuple[str, ...], str]:
@@ -115,6 +193,12 @@ def new_run_dir(root: str | Path, prefix: str) -> Path:
             "is_smoke": False,
             "created_at": pd.Timestamp.now(tz="Asia/Shanghai").isoformat(),
             "git_commit": current_commit(),
+            "requirements_hash": (
+                sha256(Path("requirements-lock.txt"))
+                if Path("requirements-lock.txt").exists()
+                else "unavailable"
+            ),
+            "random_seed": DEFAULT_RANDOM_SEED,
         },
     )
     return output
@@ -131,11 +215,38 @@ def _latest_name(run_type: str) -> str:
 
 
 def finalize_run(run_dir: str | Path, manifest: dict[str, object]) -> dict[str, object]:
-    """写入完成状态，并更新 results/latest 下的分类指针。"""
+    """写入完成状态，并更新 results/latest 下的分类指针。
+
+    先合并初始 manifest，避免结束时覆盖 ``created_at``、``run_prefix`` 和
+    初始 git SHA；调用方提供的字段优先级更高。
+    """
 
     run_path = Path(run_dir)
-    payload = dict(manifest)
+    existing: dict[str, object] = {}
+    existing_path = run_path / "manifest.json"
+    if existing_path.exists():
+        try:
+            loaded = json.loads(existing_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                existing = loaded
+        except (OSError, json.JSONDecodeError):
+            existing = {}
+    payload = {**existing, **manifest}
     payload.setdefault("run_id", run_path.name)
+    payload.setdefault("run_prefix", existing.get("run_prefix", "unknown"))
+    payload.setdefault("created_at", existing.get("created_at", pd.Timestamp.now(tz="Asia/Shanghai").isoformat()))
+    payload.setdefault("git_commit", existing.get("git_commit", current_commit()))
+    payload.setdefault(
+        "requirements_hash",
+        sha256(Path("requirements-lock.txt"))
+        if Path("requirements-lock.txt").exists()
+        else "unavailable",
+    )
+    payload.setdefault("config_hash", config_fingerprint(payload.get("config", {})))
+    payload.setdefault("feature_hash", payload.get("feature_schema_hash", "unavailable"))
+    payload.setdefault("dataset_hash", payload.get("data_hash", "unavailable"))
+    payload.setdefault("model_params_hash", payload.get("model_params_hash", "unavailable"))
+    payload.setdefault("random_seed", DEFAULT_RANDOM_SEED)
     payload.setdefault("status", "completed")
     payload["status"] = "completed"
     payload["finished_at"] = pd.Timestamp.now(tz="Asia/Shanghai").isoformat()
@@ -162,7 +273,90 @@ def is_eligible_for_best(manifest: dict[str, object]) -> bool:
         isinstance(files.get(key), str) for key in ("model", "result", "submission")
     )
     mape = manifest.get("pooled_mape")
-    return bool(required and required_files and isinstance(mape, (int, float)) and float(mape) >= 0)
+    evidence = manifest.get("promotion_evidence")
+    evidence_ok = isinstance(evidence, dict) and all(
+        isinstance(evidence.get(key), str)
+        for key in ("oof_report", "leakage_report", "pytest_report", "submission_report")
+    )
+    return bool(
+        required
+        and required_files
+        and evidence_ok
+        and isinstance(mape, (int, float))
+        and float(mape) >= 0
+    )
+
+
+def _read_json_object(path: Path) -> dict[str, object] | None:
+    """读取机械收据；格式错误时返回 ``None`` 而不是信任人工标志。"""
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _bool_receipt(payload: dict[str, object], keys: tuple[str, ...]) -> bool:
+    """从不同脚本约定的字段名中读取通过状态。"""
+
+    return any(payload.get(key) is True for key in keys)
+
+
+def _find_numeric(payload: object, keys: tuple[str, ...]) -> float | None:
+    """在有限层级的 JSON 报告中查找数值指标。"""
+
+    if isinstance(payload, dict):
+        for key in keys:
+            value = payload.get(key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                return float(value)
+        for value in payload.values():
+            found = _find_numeric(value, keys)
+            if found is not None:
+                return found
+    elif isinstance(payload, list):
+        for value in payload:
+            found = _find_numeric(value, keys)
+            if found is not None:
+                return found
+    return None
+
+
+def promotion_evidence_passes(run_dir: str | Path, manifest: dict[str, object]) -> bool:
+    """读取四类收据并确认其内容与 manifest 一致。"""
+
+    evidence = manifest.get("promotion_evidence")
+    if not isinstance(evidence, dict):
+        return False
+    paths = {
+        key: Path(run_dir) / str(evidence.get(key, ""))
+        for key in ("oof_report", "leakage_report", "pytest_report", "submission_report")
+    }
+    receipts = {key: _read_json_object(path) for key, path in paths.items()}
+    if any(payload is None for payload in receipts.values()):
+        return False
+    oof = receipts["oof_report"]
+    leakage = receipts["leakage_report"]
+    pytest_report = receipts["pytest_report"]
+    submission = receipts["submission_report"]
+    assert oof is not None
+    assert leakage is not None
+    assert pytest_report is not None
+    assert submission is not None
+    pooled = _find_numeric(oof, ("pooled_mape", "score_oof_long"))
+    manifest_mape = manifest.get("pooled_mape")
+    if pooled is None or not isinstance(manifest_mape, (int, float)):
+        return False
+    if abs(float(pooled) - float(manifest_mape)) > 1e-12:
+        return False
+    if not _bool_receipt(leakage, ("passed", "leakage_passed")):
+        return False
+    if not _bool_receipt(pytest_report, ("passed", "tests_passed")):
+        return False
+    if pytest_report.get("returncode") not in (None, 0):
+        return False
+    return _bool_receipt(submission, ("valid", "submission_valid", "passed"))
 
 
 def promote_if_best(run_dir: str | Path, best_dir: str | Path) -> bool:
@@ -176,11 +370,29 @@ def promote_if_best(run_dir: str | Path, best_dir: str | Path) -> bool:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if not is_eligible_for_best(manifest):
         return False
+    evidence = manifest.get("promotion_evidence", {})
+    if isinstance(evidence, dict):
+        for key in ("oof_report", "leakage_report", "pytest_report", "submission_report"):
+            path = run_path / str(evidence[key])
+            if not path.is_file() or path.stat().st_size == 0:
+                return False
+    if not promotion_evidence_passes(run_path, manifest):
+        return False
+    files = manifest.get("best_files", {})
+    if isinstance(files, dict):
+        for key in ("model", "result", "submission"):
+            path = run_path / str(files[key])
+            if not path.is_file() or path.stat().st_size == 0:
+                return False
     current_summary = best_path / "summary.json"
     if current_summary.exists():
         current = json.loads(current_summary.read_text(encoding="utf-8"))
         current_mape = current.get("pooled_mape")
-        if isinstance(current_mape, (int, float)) and float(current_mape) <= float(manifest["pooled_mape"]):
+        if (
+            is_eligible_for_best(current)
+            and isinstance(current_mape, (int, float))
+            and float(current_mape) <= float(manifest["pooled_mape"])
+        ):
             return False
     temp_path = best_path.parent / ".best_tmp"
     if temp_path.exists():
@@ -191,21 +403,42 @@ def promote_if_best(run_dir: str | Path, best_dir: str | Path) -> bool:
         files = {}
     summary = dict(manifest)
     summary["source_run"] = str(run_path.resolve())
-    summary_path = temp_path / "summary.json"
-    write_json(summary_path, summary)
-    write_json(temp_path / "manifest.json", summary)
-    for target_name, source_name in {
+    file_map = {
         "model.joblib": files.get("model", "model.joblib"),
         "result.csv": files.get("result", "result.csv"),
         "submission.zip": files.get("submission", "submission.zip"),
         "report.json": files.get("report", "report.json"),
         "selection.json": files.get("selection", "selection.json"),
-    }.items():
+        "oof.csv": manifest.get("oof", "oof.csv"),
+        "config.json": manifest.get("config_file", "config.json"),
+    }
+    for target_name, source_name in file_map.items():
         if not isinstance(source_name, str):
             continue
         source = run_path / source_name
         if source.exists() and source.is_file():
             shutil.copy2(source, temp_path / target_name)
+    evidence_targets = {
+        "oof_report": "oof_report.json",
+        "leakage_report": "leakage.json",
+        "pytest_report": "pytest.json",
+        "submission_report": "submission.json",
+    }
+    source_evidence = manifest.get("promotion_evidence", {})
+    if isinstance(source_evidence, dict):
+        copied_evidence: dict[str, str] = {}
+        for key, target_name in evidence_targets.items():
+            source_name = source_evidence.get(key)
+            if not isinstance(source_name, str):
+                continue
+            source = run_path / source_name
+            if source.exists() and source.is_file():
+                shutil.copy2(source, temp_path / target_name)
+                copied_evidence[key] = target_name
+        summary["promotion_evidence"] = copied_evidence
+    summary_path = temp_path / "summary.json"
+    write_json(summary_path, summary)
+    write_json(temp_path / "manifest.json", summary)
     best_path.parent.mkdir(parents=True, exist_ok=True)
     backup_path = best_path.parent / ".best_previous"
     if backup_path.exists():

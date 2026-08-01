@@ -255,3 +255,36 @@ E10→E21 的 14/20 胜折结论仅证明 30 天指数衰减优于 E10 核心 Ri
 - blind 折确实从 5.799374% 降至 5.724263%（-0.075110pp），但不能覆盖开发折中的不稳定性和 `generator_1` 的 +0.000807pp 退化。
 - 日块 bootstrap（41 日块、2,000 次）中 E21 优于 champion 的概率仅为 48.45%，95% CI 为 [-0.033913pp, +0.031830pp]；仅开发折的概率更低，为 34.68%（38 日块）。
 - 因此 `formal_candidate=false`：尽管 pooled 有极小数值改善且 blind 不反转，E21 未达到多数折获胜、`generator_1` 不退化与 bootstrap 支持三道门槛。`results/best/`、现有 192×16 `result.csv` 与提交 ZIP 均保持不变；没有执行 promotion、预测手工编辑或任何测试标签/榜单反馈操作。
+
+## 2026-08-02 严格 Clean Champion C0 与 Phase 2 受控实验收尾
+
+本轮先修复标签边界、OOF checkpoint fingerprint、候选 promotion evidence 和路由后协调，再重新构建严格 C0。C0 使用 20 个严格外层折、62,858 个评分单元和 135 分钟 purge；选中 `v2_v3_target_reconciled`，LOFO 复核与固定路由一致。
+
+| 指标 | 严格 C0 |
+| --- | ---: |
+| pooled MAPE | **5.297932%** |
+| `generator_1` | 6.130328% |
+| `generator_all` | 4.465537% |
+| blind 折 | 5.790875% |
+| 路由后协调前/后 | 5.298231% → 5.297932% |
+
+C0 OOF、选择、逐折 checkpoint 和收据位于 `results/raw/runs/oof/clean_c0_strict_20260801_v2/` 与 `results/raw/runs/receipts/clean_c0_20260801_v2/`。真正 hot-start 实验的历史拟合曾出现重复计算，已增加跨在线候选/外层折缓存；缓存不改变模型语义，并通过研究测试后重跑 E90–E92。
+
+### 受控研究实验结果
+
+- E23 relation scan 仅作为残差关系诊断；E23b screening 相对 C0 退化 0.036307pp，E24 ramp 退化 0.027008pp，E26 grouped recency 的全部短筛配置均退化至少 0.027533pp，均停止。
+- E90 true-hot bias 的最佳 hl32 相对 C0 退化 0.068476pp，`generator_1` 退化 0.074147pp，只胜 2/5 折；E91 gain 最佳 hl4 退化 0.032717pp，只胜 1/5 折；E92 vintage 最佳权重 0.15 退化 0.089368pp，只胜 1/5 折。三组均不进入 development。
+- E22 damped trend 的 4 个配置结果相同，均退化 0.037341pp；E50/E51 weighted Ridge/LAD 均退化 0.032755–0.047945pp，停止。
+- E25 analog 在 5 折 screening 中 k40/k80 一度改善 0.022196/0.024028pp，因此执行完整 development；但 development 反转为退化 0.031618/0.021643pp，日块 bootstrap 支持仅 6.30%/11.45%，不做 blind，也不启动 E25b 或专家路由。
+
+### 正式训练与 Production Gate
+
+严格 C0 已完成全量 routed 训练和滚动预测，产物位于 `results/raw/runs/training/c0_formal_20260801/`。Production Gate 收据确认：
+
+- pooled OOF MAPE：5.297932%；
+- 50 个起点 × 5 类未来扰动，共 250 个案例，全部通过；
+- pytest：83 passed；
+- 提交：192 行、16 个预测列，ZIP 内唯一文件为 `result.csv`；
+- `production_gate_passed=true`，已自动晋级 `results/best/`。
+
+当前正式提交仍由严格 C0 路由产生，不包含任何研究候选或测试标签反馈。

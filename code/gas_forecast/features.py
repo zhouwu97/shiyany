@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 
 import numpy as np
 import pandas as pd
@@ -162,6 +163,72 @@ def _add_dynamic_features(
             output[f"{prefix}_slope_{window}"] = (
                 series - series.shift(window - 1)
             ) / max(window - 1, 1)
+
+
+def _run_length(mask: pd.Series) -> pd.Series:
+    """返回截至当前时刻连续 True 的长度，缺失和 False 均重置。"""
+
+    mask = mask.fillna(False).astype(bool)
+    groups = (~mask).cumsum()
+    return mask.groupby(groups, sort=False).cumcount().add(1).where(mask, 0).astype("int16")
+
+
+def _add_ramp_features(
+    output: dict[str, pd.Series | np.ndarray],
+    series: pd.Series,
+) -> None:
+    """增加 generator_1 的方向、加速度、运行长度和波动率特征。"""
+
+    for lag in (1, 2, 4):
+        output[f"feat_generator_1_ramp_diff_{lag}"] = series - series.shift(lag)
+    diff = series.diff()
+    output["feat_generator_1_acceleration"] = diff - diff.shift(1)
+    for window in (4, 8, 16):
+        history = series.shift(1)
+        rolling = history.rolling(window, min_periods=max(2, window // 2))
+        output[f"feat_generator_1_ramp_volatility_{window}"] = rolling.std()
+        output[f"feat_generator_1_ramp_range_{window}"] = rolling.max() - rolling.min()
+        output[f"feat_generator_1_ramp_q10_{window}"] = rolling.quantile(0.10)
+        output[f"feat_generator_1_ramp_q90_{window}"] = rolling.quantile(0.90)
+        output[f"feat_generator_1_ewma_{window}"] = series.ewm(
+            span=window, adjust=False, min_periods=max(2, window // 2)
+        ).mean()
+    output["feat_generator_1_ramp_up_run_length"] = _run_length(diff.gt(0))
+    output["feat_generator_1_ramp_down_run_length"] = _run_length(diff.lt(0))
+
+
+def _add_relation_features(
+    output: dict[str, pd.Series | np.ndarray],
+    filled: pd.DataFrame,
+    relation_specs: tuple[str, ...],
+) -> None:
+    """生成已冻结的工业时延关系特征。
+
+    每个 spec 形如 ``source|lag|horizon``，只引用 ``source[t-lag]``；horizon
+    仅用于让逐步长模型拥有独立关系字段，不会读取任何未来生产值。
+    """
+
+    for spec in relation_specs:
+        parts = str(spec).split("|")
+        if len(parts) != 3:
+            raise ValueError(f"relation feature 规格应为 source|lag|horizon: {spec}")
+        source, lag_text, horizon_text = parts
+        if source in filled:
+            source_series = filled[source]
+        elif source == "generator_rest" and {"generator_all", "generator_1"}.issubset(
+            filled.columns
+        ):
+            source_series = filled["generator_all"] - filled["generator_1"]
+        elif source in output:
+            source_series = pd.Series(output[source], index=filled.index)
+        else:
+            raise ValueError(f"relation feature 来源字段不存在: {source}")
+        lag = int(lag_text)
+        horizon = int(horizon_text)
+        if lag < 0 or horizon < 1:
+            raise ValueError(f"relation feature 的 lag/horizon 无效: {spec}")
+        safe_source = re.sub(r"[^0-9A-Za-z_]+", "_", source)
+        output[f"feat_relation_{safe_source}_lag_{lag}_h{horizon}"] = source_series.shift(lag)
 
 
 def build_causal_features(
@@ -368,6 +435,12 @@ def build_causal_features(
             if target in filled:
                 _add_target_aligned_features(feature_values, filled[target], target, config)
 
+    if config.enable_ramp_features and "generator_1" in filled:
+        _add_ramp_features(feature_values, filled["generator_1"])
+
+    if config.relation_features:
+        _add_relation_features(feature_values, filled, config.relation_features)
+
     _add_dynamic_features(feature_values, filled, config)
 
     zero_candidates = generator_gas_columns + [
@@ -482,7 +555,12 @@ def audit_feature_availability(columns: list[str]) -> dict[str, FeatureAvailabil
         elif column.startswith("feat_next_2h_price_"):
             metadata[column] = FeatureAvailability(120, known_in_advance=True)
         elif "_lag_" in column:
-            steps = int(column.rsplit("_", 1)[-1])
+            tail = column.rsplit("_lag_", 1)[-1]
+            steps = int(tail.split("_", 1)[0])
+            metadata[column] = FeatureAvailability(-15 * steps)
+        elif column.startswith("feat_relation_"):
+            match = re.search(r"_lag_(\d+)_h\d+$", column)
+            steps = int(match.group(1)) if match else 0
             metadata[column] = FeatureAvailability(-15 * steps)
         else:
             metadata[column] = FeatureAvailability(0)

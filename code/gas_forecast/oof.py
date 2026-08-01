@@ -17,7 +17,11 @@ from gas_forecast.model_horizon import HorizonSpecificRidgeForecaster
 from gas_forecast.model_v1 import RidgeDeltaForecaster
 from gas_forecast.regimes import attach_regimes
 from gas_forecast.scoring import ScoreSpec, absolute_percentage_error, score_oof_long
-from gas_forecast.splits import TimeFold, make_outer_folds
+from gas_forecast.splits import (
+    TimeFold,
+    assert_label_safe_fold,
+    make_outer_folds,
+)
 from gas_forecast.targets import build_delta_targets
 
 
@@ -114,8 +118,12 @@ def _evaluate_fold(
         )
         rows[f"{version}_pred"] = prediction_long.loc[keys, "prediction"].to_numpy(dtype=float)
 
-    if not (pd.to_datetime(rows["train_end"]) <= pd.to_datetime(rows["origin_time"]) - pd.Timedelta(minutes=120)).all():
-        raise RuntimeError(f"折 {fold.name} 未满足 120 分钟 purge")
+    assert_label_safe_fold(fold, max(config.feature.horizons))
+    if not (
+        pd.to_datetime(rows["train_end"]) + pd.Timedelta(minutes=15 * max(config.feature.horizons))
+        < pd.to_datetime(rows["origin_time"])
+    ).all():
+        raise RuntimeError(f"折 {fold.name} 未满足严格 label_end < validation_start purge")
     return rows
 
 
@@ -153,8 +161,36 @@ def build_legacy_oof(
     if max_folds is not None:
         folds = folds[-max_folds:]
     checkpoint_path = Path(checkpoint_dir) if checkpoint_dir is not None else None
+    # 延迟导入，避免 experiments.py 的公共 OOF 辅助函数形成循环导入。
+    from gas_forecast.experiments import build_fingerprints
+
+    checkpoint_fingerprint = {
+        **build_fingerprints(
+            config=config,
+            dataset=frame,
+            features=features,
+            model_params={
+                "versions": list(versions_tuple),
+                "targets": list(config.targets),
+                "horizons": list(config.feature.horizons),
+            },
+        ),
+        "split_semantics": "strict_label_end_before_evaluation_v1",
+    }
     if checkpoint_path is not None:
         checkpoint_path.mkdir(parents=True, exist_ok=True)
+        checkpoint_manifest_path = checkpoint_path / "manifest.json"
+        if checkpoint_manifest_path.exists():
+            checkpoint_manifest = json.loads(
+                checkpoint_manifest_path.read_text(encoding="utf-8")
+            )
+            if checkpoint_manifest.get("fingerprint") != checkpoint_fingerprint:
+                raise RuntimeError(
+                    "OOF checkpoint fingerprint 不匹配，拒绝恢复；请使用同一次运行目录 "
+                    "或显式创建新的 run-dir。"
+                )
+        elif any(checkpoint_path.glob("fold_*.csv")):
+            raise RuntimeError("发现没有 fingerprint manifest 的旧 OOF checkpoint，拒绝恢复")
     required_columns = {f"{version}_pred" for version in versions_tuple}
     parts: list[pd.DataFrame] = []
     pending: list[TimeFold] = []
@@ -196,6 +232,7 @@ def build_legacy_oof(
                 ),
                 "requested_versions": list(versions_tuple),
                 "fold_count": len(folds),
+                "fingerprint": checkpoint_fingerprint,
             }
             (checkpoint_path / "manifest.json").write_text(
                 json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
@@ -217,7 +254,10 @@ def build_legacy_oof(
             "folds": [fold.name for fold in folds],
             "models": reports,
             "shared_outer_folds": True,
-            "purge_minutes": 120,
+            "purge_minutes": 15 * (max(config.feature.horizons) + 1),
+            "max_horizon_steps": max(config.feature.horizons),
+            "strict_label_purge": True,
+            "checkpoint_fingerprint": checkpoint_fingerprint,
         },
     )
 

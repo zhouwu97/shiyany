@@ -27,6 +27,8 @@ class FeatureConfig:
     enable_time_fourier: bool = False
     enable_price_delta_features: bool = False
     enable_price_interactions: bool = False
+    enable_ramp_features: bool = False
+    relation_features: tuple[str, ...] = ()
     dynamic_feature_scope: str = "none"
     dynamic_lags: tuple[int, ...] = (1, 2, 4, 8)
     dynamic_rolling_windows: tuple[int, ...] = (4, 8)
@@ -71,6 +73,8 @@ class ModelConfig:
     ridge_recency_mode: str = "all"
     ridge_hard_window_days: int | None = None
     ridge_half_life_days: float | None = None
+    ridge_short_half_life_days: float | None = None
+    ridge_long_half_life_days: float | None = None
     ridge_magnitude_weighting: str = "uniform"
     ridge_loss: str = "ridge"
     weighted_lad_alpha: float = 0.05
@@ -84,6 +88,12 @@ class ModelConfig:
     online_bias_clip: float = 12.0
     online_vintage_weight: float = 0.25
     apply_capacity_projection: bool = True
+    analog_k: int = 40
+    analog_slot_penalty: float = 0.0
+    analog_mode: str = "weighted_median"
+    analog_local_ridge_alpha: float = 20.0
+    damped_trend_window: int = 4
+    damped_trend_damping: float = 0.85
 
 
 @dataclass(frozen=True)
@@ -173,6 +183,7 @@ def forecast_config_from_dict(payload: Mapping[str, object]) -> ForecastConfig:
         "target_aligned_cycle_days",
         "dynamic_lags",
         "dynamic_rolling_windows",
+        "relation_features",
     ):
         if key in feature_payload:
             feature_payload[key] = tuple(feature_payload[key])

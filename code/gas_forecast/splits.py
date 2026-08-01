@@ -10,6 +10,82 @@ import pandas as pd
 from gas_forecast.config import ForecastConfig
 
 
+DEFAULT_STEP_MINUTES = 15
+
+
+def label_end(
+    origin: pd.Timestamp,
+    horizon_steps: int,
+    *,
+    step_minutes: int = DEFAULT_STEP_MINUTES,
+) -> pd.Timestamp:
+    """返回一个 origin 对应的最长标签结束时刻。"""
+
+    if horizon_steps < 0:
+        raise ValueError("horizon_steps 不能为负数")
+    if step_minutes <= 0:
+        raise ValueError("step_minutes 必须为正数")
+    return pd.Timestamp(origin) + pd.Timedelta(minutes=step_minutes * horizon_steps)
+
+
+def is_label_safe(
+    origin: pd.Timestamp,
+    horizon_steps: int,
+    evaluation_start: pd.Timestamp,
+    *,
+    step_minutes: int = DEFAULT_STEP_MINUTES,
+) -> bool:
+    """判断 origin 的最长未来标签是否严格早于评估边界。
+
+    这里有意使用严格小于，而不是“相差至少一个 horizon”。如果最长标签
+    恰好落在验证区第一行，它已经读取了评估区的真实值，不能进入训练集。
+    """
+
+    return label_end(origin, horizon_steps, step_minutes=step_minutes) < pd.Timestamp(
+        evaluation_start
+    )
+
+
+def purged_train_end(
+    evaluation_start: pd.Timestamp,
+    max_horizon_steps: int,
+    *,
+    step_minutes: int = DEFAULT_STEP_MINUTES,
+) -> pd.Timestamp:
+    """返回满足 ``label_end < evaluation_start`` 的最后一个训练 origin。
+
+    对规则 15 分钟网格而言，最长 horizon 为 8 时，边界是
+    ``evaluation_start - 135min``，而不是 ``-120min``。
+    """
+
+    if max_horizon_steps < 0:
+        raise ValueError("max_horizon_steps 不能为负数")
+    return pd.Timestamp(evaluation_start) - pd.Timedelta(
+        minutes=step_minutes * (max_horizon_steps + 1)
+    )
+
+
+def assert_label_safe_fold(
+    fold: "TimeFold",
+    max_horizon_steps: int,
+    *,
+    step_minutes: int = DEFAULT_STEP_MINUTES,
+) -> None:
+    """对折边界执行统一的严格标签隔离检查。"""
+
+    if not is_label_safe(
+        fold.train_end,
+        max_horizon_steps,
+        fold.validation_start,
+        step_minutes=step_minutes,
+    ):
+        raise ValueError(
+            f"折 {fold.name} 的训练标签越过验证边界: "
+            f"label_end={label_end(fold.train_end, max_horizon_steps, step_minutes=step_minutes)}, "
+            f"validation_start={fold.validation_start}"
+        )
+
+
 @dataclass(frozen=True)
 class TimeFold:
     name: str
@@ -29,7 +105,6 @@ def make_outer_folds(index: pd.DatetimeIndex, config: ForecastConfig) -> list[Ti
     """生成与旧验证边界兼容、但显式登记训练起止时间的外层折。"""
 
     rule = config.validation
-    purge = pd.Timedelta(minutes=15 * max(config.feature.horizons))
     first = max(pd.Timestamp(rule.first_validation_date), index.min() + pd.Timedelta(days=rule.min_train_days))
     blind_start = index.max().normalize() - pd.Timedelta(days=rule.blind_days - 1)
     folds: list[TimeFold] = []
@@ -40,7 +115,7 @@ def make_outer_folds(index: pd.DatetimeIndex, config: ForecastConfig) -> list[Ti
             TimeFold(
                 name=f"dev_{number:02d}",
                 train_start=index.min(),
-                train_end=start - purge,
+                train_end=purged_train_end(start, max(config.feature.horizons)),
                 validation_start=start,
                 validation_end=start + pd.Timedelta(days=rule.validation_days),
             )
@@ -51,7 +126,7 @@ def make_outer_folds(index: pd.DatetimeIndex, config: ForecastConfig) -> list[Ti
         TimeFold(
             name="blind",
             train_start=index.min(),
-            train_end=blind_start - purge,
+            train_end=purged_train_end(blind_start, max(config.feature.horizons)),
             validation_start=blind_start,
             validation_end=index.max() + pd.Timedelta(minutes=15),
             blind=True,
@@ -78,7 +153,10 @@ def make_inner_folds(
     if folds < 2:
         raise ValueError("训练数据不足以生成至少2个内层时间折")
 
-    validation_rows = max(min_validation_rows, (len(index) - min_train_rows - purge_steps) // folds)
+    validation_rows = max(
+        min_validation_rows,
+        (len(index) - min_train_rows - purge_steps) // folds,
+    )
     first_validation = len(index) - folds * validation_rows
     result: list[TimeFold] = []
     for position in range(folds):
@@ -100,6 +178,7 @@ def make_inner_folds(
                 ),
             )
         )
+        assert_label_safe_fold(result[-1], purge_steps)
     if len(result) < 2:
         raise ValueError("有效内层时间折少于2个")
     return result

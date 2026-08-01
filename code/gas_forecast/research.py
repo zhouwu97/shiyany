@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
+import json
 from pathlib import Path
 import time
 from typing import Mapping
@@ -12,6 +13,7 @@ import pandas as pd
 from joblib import Parallel, delayed
 
 from gas_forecast.config import ForecastConfig, legacy_forecast_config, research_feature_superset
+from gas_forecast.experiments import build_fingerprints, stable_hash
 from gas_forecast.features import PriceSchedule, build_causal_features
 from gas_forecast.oof import _base_fold_rows
 from gas_forecast.online import (
@@ -24,7 +26,7 @@ from gas_forecast.scoring import (
     block_bootstrap_improvement_probability,
     score_oof_long,
 )
-from gas_forecast.splits import TimeFold, make_outer_folds
+from gas_forecast.splits import TimeFold, make_outer_folds, purged_train_end
 from gas_forecast.targets import build_delta_targets
 
 
@@ -172,6 +174,82 @@ def make_research_candidates(
             )
             for days in (30, 60, 90)
         ]
+    if experiment_id == "E22_damped_trend":
+        return [
+            _candidate(
+                experiment_id,
+                f"e22_window_{window}_damping_{damping:g}",
+                "damped_trend",
+                _with_model(
+                    config,
+                    damped_trend_window=window,
+                    damped_trend_damping=damping,
+                ),
+                "generator_1 近期趋势阻尼 specialist",
+            )
+            for window in (4, 8)
+            for damping in (0.70, 0.85)
+        ]
+    if experiment_id == "E23b_relation_ridge":
+        if not config.feature.relation_features:
+            raise ValueError("E23b 必须通过配置冻结 relation_features")
+        value = _with_model(config, generator1_feature_profile="core")
+        return [_candidate(experiment_id, "e23b_relation_ridge", "horizon", value, "冻结工业时延关系 Ridge")]
+    if experiment_id == "E24_ramp_features":
+        value = _with_feature(config, enable_ramp_features=True)
+        return [_candidate(experiment_id, "e24_ramp_features", "horizon", value, "generator_1 ramp/direction 特征")]
+    if experiment_id == "E25_analog_weighted_median":
+        return [
+            _candidate(
+                experiment_id,
+                f"e25_analog_k{k}",
+                "analog",
+                _with_model(config, analog_k=k),
+                "outer-train 相似工况加权中位数",
+            )
+            for k in (10, 20, 40, 80)
+        ]
+    if experiment_id == "E25b_analog_local_ridge":
+        return [
+            _candidate(
+                experiment_id,
+                "e25b_analog_local_ridge_k40",
+                "analog_local_ridge",
+                _with_model(config, analog_k=40, analog_mode="local_ridge"),
+                "outer-train 相似工况局部 Ridge",
+            )
+        ]
+    if experiment_id == "E26_grouped_recency":
+        candidates: list[ResearchCandidate] = []
+        for short, long in (
+            (7.0, 30.0),
+            (15.0, 30.0),
+            (30.0, 30.0),
+            (45.0, 30.0),
+            (60.0, 30.0),
+            (36500.0, 30.0),
+            (30.0, 7.0),
+            (30.0, 15.0),
+            (30.0, 45.0),
+            (30.0, 60.0),
+            (30.0, 90.0),
+            (30.0, 36500.0),
+        ):
+            candidates.append(
+                _candidate(
+                    experiment_id,
+                    f"e26_short_{short:g}_long_{long:g}",
+                    "horizon",
+                    _with_model(
+                        config,
+                        ridge_recency_mode="grouped_exp",
+                        ridge_short_half_life_days=short,
+                        ridge_long_half_life_days=long,
+                    ),
+                    "generator_1 短长步长分组 recency",
+                )
+            )
+        return candidates
     if experiment_id in {"E30_gen1_time_slot", "E31_gen1_fourier", "E32_gen1_slot_fourier"}:
         slot = experiment_id in {"E30_gen1_time_slot", "E32_gen1_slot_fourier"}
         fourier = experiment_id in {"E31_gen1_fourier", "E32_gen1_slot_fourier"}
@@ -236,7 +314,8 @@ def make_research_candidates(
         "E92_online_vintage_true_hot",
     }:
         mode = experiment_id.split("_")[2]
-        vintage_weights = (0.15, 0.25) if mode == "vintage" else (0.25,)
+        half_lives = (4.0, 8.0, 16.0, 32.0)
+        vintage_weights = (0.15, 0.25, 0.40) if mode == "vintage" else (0.25,)
         return [
             _candidate(
                 experiment_id,
@@ -250,7 +329,7 @@ def make_research_candidates(
                 "真正 OOF hot start 在线校准",
                 online_mode=mode,
             )
-            for half_life in (8.0, 16.0, 32.0)
+            for half_life in half_lives
             for vintage_weight in vintage_weights
         ]
     if experiment_id == "E100_dynamic_core":
@@ -420,6 +499,14 @@ def make_research_model(candidate: ResearchCandidate):
 
     if candidate.kind in {"horizon", "capacity", "online_hot_start"}:
         return Generator1HorizonRidgeForecaster(candidate.config)
+    if candidate.kind in {"analog", "analog_local_ridge"}:
+        from gas_forecast.specialists import AnalogGenerator1Forecaster
+
+        return AnalogGenerator1Forecaster(candidate.config)
+    if candidate.kind == "damped_trend":
+        from gas_forecast.specialists import DampedTrendGenerator1Forecaster
+
+        return DampedTrendGenerator1Forecaster(candidate.config)
     if candidate.kind == "catboost":
         return Generator1CatBoostForecaster(candidate.config)
     if candidate.kind == "lgb":
@@ -477,11 +564,10 @@ def _calibration_history_predictions(
     origins = train_index[-min(history_rows, len(train_index)) :]
     if len(origins) < max(32, max(candidate.config.feature.horizons) * 2):
         raise ValueError("训练尾部没有足够的 OOF calibration history")
-    purge = pd.Timedelta(minutes=15 * max(candidate.config.feature.horizons))
     parts: list[pd.DataFrame] = []
     for start in range(0, len(origins), stride):
         block = origins[start : start + stride]
-        cutoff = block[0] - purge
+        cutoff = purged_train_end(block[0], max(candidate.config.feature.horizons))
         fit_mask = (frame.index >= fold.train_start) & (frame.index <= cutoff)
         if int(fit_mask.sum()) < 200:
             raise ValueError("真正 hot start 的前置 OOF 历史训练样本不足 200 行")
@@ -500,6 +586,26 @@ def _calibration_history_predictions(
     return history_predictions, history_current
 
 
+def _online_history_cache_key(candidate: ResearchCandidate) -> str:
+    """生成可跨在线参数复用的 hot-start 基础预测缓存键。
+
+    偏差、增益和 vintage 权重只影响校准器，不影响验证前基础模型的
+    OOF 历史预测；半衰期等在线参数也不应导致重复拟合。保留历史长度、
+    重训步幅及其余模型字段，避免把真正改变基础预测的配置错误合并。
+    """
+
+    payload = asdict(candidate.config)
+    model_payload = dict(payload["model"])
+    for field_name in (
+        "online_half_life",
+        "online_bias_clip",
+        "online_vintage_weight",
+    ):
+        model_payload.pop(field_name, None)
+    payload["model"] = model_payload
+    return stable_hash(payload)
+
+
 def _evaluate_research_fold(
     frame: pd.DataFrame,
     features: pd.DataFrame,
@@ -507,6 +613,7 @@ def _evaluate_research_fold(
     fold: TimeFold,
     candidate: ResearchCandidate,
     cached_generator_all: pd.DataFrame | None = None,
+    calibration_history: tuple[pd.DataFrame, pd.DataFrame] | None = None,
 ) -> pd.DataFrame:
     """训练一个候选并返回一个外层折的长表预测。"""
 
@@ -541,9 +648,12 @@ def _evaluate_research_fold(
             cached_generator_all.reindex(validation_index),
         )
     if candidate.kind == "online_hot_start":
-        history_prediction, history_current = _calibration_history_predictions(
-            frame, features, deltas, fold, candidate
-        )
+        if calibration_history is None:
+            history_prediction, history_current = _calibration_history_predictions(
+                frame, features, deltas, fold, candidate
+            )
+        else:
+            history_prediction, history_current = calibration_history
         online_modes = candidate.online_modes or (candidate.online_mode or "bias",)
         online_kwargs = {
             "half_life": candidate.config.model.online_half_life,
@@ -587,6 +697,7 @@ def _load_or_evaluate_fold(
     candidate: ResearchCandidate,
     checkpoint_dir: Path | None,
     cached_generator_all: pd.DataFrame | None = None,
+    calibration_history: tuple[pd.DataFrame, pd.DataFrame] | None = None,
 ) -> pd.DataFrame:
     path = (
         checkpoint_dir / f"{candidate.name}__{fold.name}.csv" if checkpoint_dir is not None else None
@@ -603,6 +714,7 @@ def _load_or_evaluate_fold(
         fold,
         candidate,
         cached_generator_all,
+        calibration_history,
     )
     if path is not None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -885,6 +997,11 @@ def build_research_oof(
     checkpoint_path = Path(checkpoint_dir) if checkpoint_dir is not None else None
     # Alpha、损失权重等消融会共享同一特征配置；缓存可避免重复计算长窗口特征。
     feature_cache: dict[object, pd.DataFrame] = {}
+    # E90/E91/E92 的在线参数不同，但验证前基础 OOF 历史预测相同；按基础
+    # 配置和外层折缓存，避免每个在线候选重复执行大量历史拟合。
+    online_history_cache: dict[
+        str, dict[str, tuple[pd.DataFrame, pd.DataFrame]]
+    ] = {}
 
     def resolve_features(candidate: ResearchCandidate) -> pd.DataFrame:
         # 正式 champion 必须使用其原始 legacy 特征，不能被研究超集静默改变。
@@ -900,6 +1017,42 @@ def build_research_oof(
         return cached
 
     base_features = resolve_features(baseline_candidate)
+    checkpoint_fingerprint = {
+        **build_fingerprints(
+            config={
+                "reference": asdict(reference),
+                "candidates": [
+                    {"name": candidate.name, "config": asdict(candidate.config)}
+                    for candidate in candidates
+                ],
+                "scope": scope,
+                "baseline_name": baseline_name,
+            },
+            dataset=frame,
+            features=base_features,
+            model_params={
+                "candidate_names": names,
+                "folds": [fold.name for fold in folds],
+            },
+        ),
+        "split_semantics": "strict_label_end_before_evaluation_v1",
+        "candidate_configs_hash": stable_hash(
+            {candidate.name: asdict(candidate.config) for candidate in candidates}
+        ),
+    }
+    if checkpoint_path is not None:
+        checkpoint_path.mkdir(parents=True, exist_ok=True)
+        checkpoint_manifest_path = checkpoint_path / "manifest.json"
+        if checkpoint_manifest_path.exists():
+            checkpoint_manifest = json.loads(
+                checkpoint_manifest_path.read_text(encoding="utf-8")
+            )
+            if checkpoint_manifest.get("fingerprint") != checkpoint_fingerprint:
+                raise RuntimeError(
+                    "研究 checkpoint fingerprint 不匹配，拒绝恢复；请使用新的 run-dir。"
+                )
+        elif any(checkpoint_path.glob("*.csv")):
+            raise RuntimeError("发现没有 fingerprint manifest 的旧研究 checkpoint，拒绝恢复")
     row_parts = []
     for fold in folds:
         _, validation_mask = fold.masks(frame.index)
@@ -915,6 +1068,42 @@ def build_research_oof(
         deltas = build_delta_targets(
             frame, candidate.config.targets, candidate.config.feature.horizons
         )
+        calibration_history_by_fold: dict[str, tuple[pd.DataFrame, pd.DataFrame]] = {}
+        if candidate.kind == "online_hot_start":
+            cache_key = _online_history_cache_key(candidate)
+            calibration_history_by_fold = online_history_cache.setdefault(cache_key, {})
+            pending_history_folds = [
+                fold
+                for fold in folds
+                if fold.name not in calibration_history_by_fold
+                and not (
+                    checkpoint_path is not None
+                    and (checkpoint_path / f"{candidate.name}__{fold.name}.csv").exists()
+                )
+            ]
+            if pending_history_folds:
+                if n_jobs == 1:
+                    history_parts = [
+                        _calibration_history_predictions(
+                            frame, features, deltas, fold, candidate
+                        )
+                        for fold in pending_history_folds
+                    ]
+                else:
+                    history_parts = Parallel(n_jobs=n_jobs, verbose=10)(
+                        delayed(_calibration_history_predictions)(
+                            frame, features, deltas, fold, candidate
+                        )
+                        for fold in pending_history_folds
+                    )
+                calibration_history_by_fold.update(
+                    {
+                        fold.name: history
+                        for fold, history in zip(
+                            pending_history_folds, history_parts, strict=True
+                        )
+                    }
+                )
         reusable_generator_all = (
             _generator_all_predictions_by_fold(
                 rows,
@@ -938,6 +1127,7 @@ def build_research_oof(
                     reusable_generator_all.get(fold.name)
                     if reusable_generator_all is not None
                     else None,
+                    calibration_history_by_fold.get(fold.name),
                 )
                 for fold in folds
             ]
@@ -953,6 +1143,7 @@ def build_research_oof(
                     reusable_generator_all.get(fold.name)
                     if reusable_generator_all is not None
                     else None,
+                    calibration_history_by_fold.get(fold.name),
                 )
                 for fold in folds
             )
@@ -961,6 +1152,26 @@ def build_research_oof(
         if not np.isfinite(values).all():
             raise ValueError(f"候选 {candidate.name} 未覆盖全部 OOF 行")
         rows[f"{candidate.name}_pred"] = values
+        if checkpoint_path is not None:
+            (checkpoint_path / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "fingerprint": checkpoint_fingerprint,
+                        "completed_candidates": [
+                            name
+                            for name in names
+                            if any(
+                                checkpoint_path.glob(f"{name}__*.csv")
+                            )
+                        ],
+                        "folds": [fold.name for fold in folds],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
     baseline_column = f"{baseline_name}_pred"
     if baseline_column not in rows:
         raise ValueError(f"指定的基线候选不存在: {baseline_name}")
@@ -1018,6 +1229,9 @@ def build_research_oof(
         "candidates": {candidate.name: candidate_payload(candidate) for candidate in candidates},
         "models": reports,
         "capacity_projection_audit": capacity_audit,
+        "checkpoint_fingerprint": checkpoint_fingerprint,
+        "strict_label_purge": True,
+        "purge_minutes": 15 * (max(reference.feature.horizons) + 1),
         "duration_seconds": duration,
     }
     return ResearchOOFResult(rows=rows.reset_index(drop=True), report=report, duration_seconds=duration)

@@ -48,6 +48,13 @@ def select_generator1_features(
         "feat_generator_1_lag_",
         "feat_generator_1_diff_",
         "feat_generator_1_slope_",
+        "feat_generator_1_ramp_",
+        "feat_generator_1_acceleration",
+        "feat_generator_1_ewma_",
+        "feat_generator_1_ramp_volatility_",
+        "feat_generator_1_ramp_range_",
+        "feat_generator_1_ramp_q",
+        "feat_relation_",
         "feat_generator_1_aligned_",
         "feat_generator_1_same_slot_",
         "feat_generator_rest_lag_",
@@ -102,6 +109,16 @@ def select_generator1_features(
                 or column.startswith("feat_generator_gas_total_price_")
                 or column.startswith("feat_gas_holder_price_")
             ):
+                return False
+            if not feature.enable_ramp_features and (
+                column.startswith("feat_generator_1_ramp_")
+                or column.startswith("feat_generator_1_acceleration")
+                or column.startswith("feat_generator_1_ewma_")
+            ):
+                return False
+            if feature.relation_features and column.startswith("feat_relation_"):
+                return True
+            if not feature.relation_features and column.startswith("feat_relation_"):
                 return False
             if not column.startswith("feat_dynamic_"):
                 return True

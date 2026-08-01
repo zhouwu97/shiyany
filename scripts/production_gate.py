@@ -1,0 +1,192 @@
+"""执行正式候选的 OOF、泄漏、测试、提交和哈希生产门。"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+import zipfile
+from pathlib import Path
+
+import joblib
+import pandas as pd
+
+from gas_forecast.config import ForecastConfig
+from gas_forecast.data import align_tables
+from gas_forecast.experiments import finalize_run, promote_if_best, sha256, write_json
+from gas_forecast.features import build_causal_features, load_price_schedule
+from gas_forecast.leakage import audit_future_perturbations
+from gas_forecast.scoring import score_oof_long
+from gas_forecast.submission import validate_submission_frame
+
+
+def _resolve_data_dir(path: Path) -> Path:
+    if (path / "Pre_gas.csv").exists():
+        return path
+    matches = sorted(
+        child for child in path.iterdir() if child.is_dir() and (child / "Pre_gas.csv").exists()
+    )
+    if len(matches) != 1:
+        raise FileNotFoundError(f"无法解析官方数据目录: {path}")
+    return matches[0]
+
+
+def _candidate_prediction_column(candidate: str) -> str:
+    return "routed_pred" if candidate.startswith("lofo_") else f"{candidate}_pred"
+
+
+def _run_pytest(repo_root: Path) -> dict[str, object]:
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return {
+        "passed": result.returncode == 0,
+        "returncode": int(result.returncode),
+        "stdout_tail": result.stdout[-4000:],
+        "stderr_tail": result.stderr[-4000:],
+    }
+
+
+def _zip_receipt(path: Path) -> dict[str, object]:
+    with zipfile.ZipFile(path) as archive:
+        members = archive.namelist()
+    return {"valid": members == ["result.csv"], "members": members}
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="运行正式候选 Production Gate")
+    parser.add_argument("--run-dir", type=Path, required=True)
+    parser.add_argument("--data-dir", type=Path, required=True)
+    parser.add_argument("--best-dir", type=Path, default=Path("results/best"))
+    parser.add_argument("--origins", type=int, default=50)
+    parser.add_argument("--jobs", type=int, default=8)
+    parser.add_argument("--no-promote", action="store_true")
+    args = parser.parse_args()
+    run_dir = args.run_dir
+    manifest_path = run_dir / "manifest.json"
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"候选运行缺少 manifest.json: {run_dir}")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    candidate = str(manifest.get("candidate", "unknown"))
+    model_path = run_dir / str(manifest.get("best_files", {}).get("model", "model.joblib"))
+    result_path = run_dir / str(
+        manifest.get("best_files", {}).get("result", "submission/result.csv")
+    )
+    archive_path = run_dir / str(
+        manifest.get("best_files", {}).get("submission", "submission.zip")
+    )
+    oof_path = run_dir / str(manifest.get("oof", "oof.csv"))
+    report_path = run_dir / str(manifest.get("report", "report.json"))
+    for path in (model_path, result_path, archive_path, oof_path, report_path):
+        if not path.is_file():
+            raise FileNotFoundError(f"Production Gate 缺少产物: {path}")
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    rows = pd.read_csv(oof_path, parse_dates=["origin_time"])
+    prediction_column = _candidate_prediction_column(candidate)
+    if prediction_column not in rows:
+        prediction_column = "routed_pred" if "routed_pred" in rows else prediction_column
+    oof_score = score_oof_long(rows, prediction_column)
+    oof_receipt = {
+        "passed": bool(report.get("strict_label_purge", False)),
+        "pooled_mape": float(oof_score["pooled_mape"]),
+        "prediction_column": prediction_column,
+        "strict_label_purge": bool(report.get("strict_label_purge", False)),
+        "report": str(report_path.relative_to(run_dir)),
+    }
+    if not oof_receipt["passed"]:
+        raise RuntimeError("OOF 报告未声明 strict_label_purge")
+
+    model = joblib.load(model_path)
+    config = getattr(model, "config", ForecastConfig())
+    data_dir = _resolve_data_dir(args.data_dir)
+    dataset = align_tables(data_dir, config.feature.frequency)
+    prices = sorted(data_dir.glob("*price*.xlsx"))
+    price = load_price_schedule(prices[0]) if prices else None
+
+    def builder(frame: pd.DataFrame) -> pd.DataFrame:
+        return build_causal_features(frame, config.feature, price)
+
+    def predictor(features: pd.DataFrame, current: pd.DataFrame) -> pd.DataFrame:
+        return model.predict(features, current.loc[:, list(config.targets)])
+
+    leakage = audit_future_perturbations(
+        dataset.frame,
+        builder,
+        predictor=predictor,
+        origins=args.origins,
+        n_jobs=args.jobs,
+    )
+    write_json(run_dir / "oof_report.json", oof_receipt)
+    write_json(run_dir / "leakage.json", leakage)
+
+    pytest_receipt = _run_pytest(Path.cwd())
+    write_json(run_dir / "pytest.json", pytest_receipt)
+    submission_frame = pd.read_csv(result_path)
+    validation = validate_submission_frame(submission_frame, config)
+    zip_receipt = _zip_receipt(archive_path)
+    submission_receipt = {"valid": True, "validation": validation, "archive": zip_receipt}
+    write_json(run_dir / "submission.json", submission_receipt)
+    hashes = {
+        "model": sha256(model_path),
+        "result": sha256(result_path),
+        "submission": sha256(archive_path),
+        "oof": sha256(oof_path),
+        "report": sha256(report_path),
+    }
+    evidence = {
+        "oof_report": "oof_report.json",
+        "leakage_report": "leakage.json",
+        "pytest_report": "pytest.json",
+        "submission_report": "submission.json",
+    }
+    passed = bool(
+        oof_receipt["passed"]
+        and leakage.get("passed") is True
+        and pytest_receipt["passed"] is True
+        and submission_receipt["valid"] is True
+        and zip_receipt["valid"] is True
+    )
+    finalized = finalize_run(
+        run_dir,
+        {
+            "candidate": candidate,
+            "pooled_mape": float(oof_receipt["pooled_mape"]),
+            "leakage_passed": bool(leakage.get("passed") is True),
+            "tests_passed": bool(pytest_receipt["passed"] is True),
+            "submission_valid": bool(submission_receipt["valid"] and zip_receipt["valid"]),
+            "promotion_evidence": evidence,
+            "hashes": hashes,
+            "production_gate_passed": passed,
+        },
+    )
+    promoted = False
+    if passed and not args.no_promote:
+        promoted = promote_if_best(run_dir, args.best_dir)
+    print(
+        json.dumps(
+            {
+                "candidate": candidate,
+                "pooled_mape": finalized["pooled_mape"],
+                "production_gate_passed": passed,
+                "promoted": promoted,
+                "leakage": leakage,
+                "pytest": pytest_receipt,
+                "submission": submission_receipt,
+                "hashes": hashes,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    if not passed:
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    main()

@@ -13,7 +13,27 @@
 
 所有实验入口默认按 `results/raw/runs/{oof,comparisons,training,experiments,audits}/<运行时间>/` 分类写入独立目录；报告、预测、模型、日志和逐折 checkpoint 不跨运行混放。`results/latest/` 保存各类最近运行指针，`results/best/` 只保存满足完整运行、泄漏、测试和提交校验的当前最优模型。最终上传入口固定为 `提交这个/teamname_gas_predict_prelim.zip`。只有恢复同一次中断运行时才允许显式复用 `--run-dir`。评分名称为 `competition_mape`，显式登记 epsilon、聚合和缺失策略；官方零值细则未确认前不使用 `official_mape` 名称。目标×步长路由按“单元→目标→全局”三级回缩。MinTrace 仅在对角协调已稳定提升且误差协方差样本充分后启用。
 
-截至 2026-08-01：M1 已冻结并产出可提交 ZIP；M2/M3 完整 OOF 未超过 M1，M4 smoke 也未超过 M1，均按门槛拒绝晋级。最终冻结模型已通过 250 案例未来扰动审计。后续只做提交复核和必要的环境复现，不再为初赛提交继续扩展模型自由度。
+截至 2026-08-01 的 M1-M4 历史收尾结论保留：M1 已冻结，M2/M3 完整 OOF 和 M4 smoke 未超过当时 M1。随后按用户确认的受控扩展计划完成严格 C0 重建、E23/E23b/E24/E25/E26、E90-E92、E50/E51 与正式 Production Gate；当前状态以本文末的执行记录为准。
+
+## 2026-08-02 受控扩展计划执行记录
+
+### 执行顺序
+
+1. 先修复严格 label purge、OOF/research checkpoint fingerprint、promotion evidence、路由后协调和真实 hot-start 历史缓存。
+2. 重建 Clean Champion C0，固定 `v2_v3_target_reconciled`，再执行 E23 relation 诊断、E23b/E24/E26 screening。
+3. 对在线模块执行 E90 bias、E91 gain、E92 vintage 的真实 OOF hot-start screening；只允许通过 screening 的候选进入 development。
+4. 执行 E22/E25 结构候选和 E50/E51 低容量线性候选；E25 的 screening winner 必须再次通过完整 development 才能触发 blind。
+5. 对最终 C0 执行全量训练、滚动预测、未来扰动审计、完整测试和提交校验，只有 Production Gate 全部通过才允许 promotion。
+
+### 当前实测结论
+
+- 严格 C0：20 折、62,858 个评分单元、135 分钟 purge，pooled MAPE **5.297932%**，blind 5.790875%。
+- E23b、E24、E26、E22、E50、E51 未通过 screening；E90-E92 未通过 screening；E25 k40/k80 未通过完整 development。所有停止均保留独立 run、checkpoint、report 和 receipt。
+- C0 正式训练目录为 `results/raw/runs/training/c0_formal_20260801/`；Production Gate 通过 250 个未来扰动案例、83 项 pytest 和 ZIP 校验，已晋级 `results/best/`。
+
+### 不可突破的发布门槛
+
+研究候选不得因单个 screening 折、单个 blind 折或局部目标改善而晋级；必须完成同口径 development、必要时 final blind、模型级泄漏审计、完整测试和提交校验。当前正式入口继续使用 C0 routed champion，研究分支只作为可追溯实验资产保留。
 
 ## 1. 目标与不可突破的边界
 

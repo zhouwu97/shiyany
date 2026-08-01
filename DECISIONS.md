@@ -76,3 +76,11 @@
 - 正式晋级必须比较当前 champion，而非 E10。使用 `results/best/selection.json` 的冻结 V2/V3 路由、当前容量约束、相同 20 折和 62,858 个单元重新训练后，formal champion 为 5.301877%，E21 为 5.301845%，表面 pooled 优势仅 0.000032pp。
 - E21 的 `generator_1` 从 6.131131% 退化到 6.131938%，只赢 8/20 折，最近 5 个开发折仅赢 1 折；尽管 blind 改善 0.075110pp，日块 bootstrap 的全样本支持概率仅 48.45%，开发折为 34.68%。
 - 决定：`formal_candidate=false`，拒绝将 E21 覆盖到 `results/best/`。保留已训练模型、OOF、泄漏审计和研究代码作为后续时间编码、价格交互、weighted Ridge 的受控起点；正式提交继续使用 M1 V2/V3 routed champion。
+
+## 2026-08-02 严格 C0 重建与研究停止规则执行
+
+- 修复并冻结严格标签边界：最大步长 8 的训练末端距验证起点保留 135 分钟；所有 OOF/research checkpoint 必须通过数据、特征、配置、依赖和切分语义 fingerprint。
+- 严格 C0 在 20 折、62,858 个评分单元上得到 pooled 5.297932%，blind 5.790875%；`v2_v3_target_reconciled` 与 LOFO 复核一致，成为当前正式候选。
+- E23b、E24、E26、E22、E50、E51 均在 screening 阶段按 pooled/目标/胜折门槛停止。E90–E92 共完成 20 个真实 hot-start 配置，最佳候选仍相对 C0 退化，全部停止，不做 development。
+- E25 k40/k80 虽通过 5 折 screening，但完整 development 分别退化 0.031618pp/0.021643pp，bootstrap 支持仅 6.30%/11.45%；拒绝 blind、E25b 和专家路由，避免把筛选噪声带入正式训练。
+- Production Gate 通过 250 个未来扰动案例、83 项测试和提交 ZIP 校验；`production_gate_passed=true`，严格 C0 已覆盖 `results/best/`。正式提交只保留 `result.csv`，没有读取测试未来标签或排行榜反馈。

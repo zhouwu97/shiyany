@@ -13,6 +13,7 @@ from gas_forecast.model_ensemble import GasAwareEnsembleForecaster
 from gas_forecast.model_v1 import RidgeDeltaForecaster
 from gas_forecast.model_horizon import HorizonSpecificRidgeForecaster
 from gas_forecast.scoring import competition_mape
+from gas_forecast.splits import purged_train_end
 from gas_forecast.targets import build_delta_targets
 
 
@@ -38,7 +39,7 @@ def make_rolling_folds(index: pd.DatetimeIndex, config: ForecastConfig) -> list[
                 name=f"dev_{number:02d}",
                 validation_start=start,
                 validation_end=start + pd.Timedelta(days=rule.validation_days),
-                train_end=start - pd.Timedelta(minutes=15 * max(config.feature.horizons)),
+                train_end=purged_train_end(start, max(config.feature.horizons)),
             )
         )
         number += 1
@@ -48,7 +49,7 @@ def make_rolling_folds(index: pd.DatetimeIndex, config: ForecastConfig) -> list[
             name="blind",
             validation_start=blind_start,
             validation_end=index.max() + pd.Timedelta(minutes=15),
-            train_end=blind_start - pd.Timedelta(minutes=15 * max(config.feature.horizons)),
+            train_end=purged_train_end(blind_start, max(config.feature.horizons)),
             blind=True,
         )
     )
@@ -76,7 +77,7 @@ def backtest_model(
     if max_folds is not None:
         folds = folds[-max_folds:]
     def evaluate_fold(fold: RollingFold) -> dict[str, object]:
-        train_mask = features.index < fold.train_end
+        train_mask = features.index <= fold.train_end
         validation_mask = (features.index >= fold.validation_start) & (
             features.index < fold.validation_end
         )

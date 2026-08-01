@@ -13,7 +13,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from gas_forecast.experiments import is_eligible_for_best, promote_if_best, write_json
+from gas_forecast.experiments import (
+    is_eligible_for_best,
+    promotion_evidence_passes,
+    promote_if_best,
+    write_json,
+)
 from gas_forecast.submission import validate_submission_frame
 
 
@@ -37,11 +42,23 @@ def bootstrap_best(
     source_run: Path,
     best_dir: Path,
     *,
-    pooled_mape: float,
-    candidate: str,
-    report: Path | None,
-    selection: Path | None,
+    report: Path | None = None,
+    selection: Path | None = None,
 ) -> bool:
+    """仅从已有正式运行的机械报告初始化 best。
+
+    不再接受 CLI 传入的 pooled MAPE、候选名或通过标志；这些字段必须来自
+    source run 的 manifest 和四类验证收据。
+    """
+
+    source_manifest_path = source_run / "manifest.json"
+    if not source_manifest_path.exists():
+        raise SystemExit(f"正式运行缺少 manifest.json: {source_run}")
+    source_manifest = json.loads(source_manifest_path.read_text(encoding="utf-8"))
+    if not is_eligible_for_best(source_manifest):
+        raise SystemExit("source run 未通过完整 OOF、泄漏、测试和提交机械门槛")
+    if not promotion_evidence_passes(source_run, source_manifest):
+        raise SystemExit("source run 的验证收据内容与 manifest 不一致")
     model = _find_source_file(source_run, ("model.joblib", "model/model.joblib"))
     result = _find_source_file(
         source_run, ("result.csv", "s_result.csv", "submission/s_result.csv", "submission/result.csv")
@@ -55,28 +72,33 @@ def bootstrap_best(
     shutil.copy2(model, candidate_dir / "model.joblib")
     shutil.copy2(result, candidate_dir / "result.csv")
     shutil.copy2(archive, candidate_dir / "submission.zip")
-    manifest = {
-        "run_id": "best",
-        "run_type": "training",
-        "stage": "M1",
-        "candidate": candidate,
-        "status": "completed",
-        "is_smoke": False,
-        "pooled_mape": pooled_mape,
-        "offline_score": 1 - pooled_mape,
-        "leakage_passed": True,
-        "tests_passed": True,
-        "submission_valid": True,
-        "source_run": str(source_run.resolve()),
-        "best_files": {
-            "model": "model.joblib",
-            "result": "result.csv",
-            "submission": "submission.zip",
-            "report": "report.json",
-            "selection": "selection.json",
-        },
-        "submission_path": "submission.zip",
-    }
+    manifest = dict(source_manifest)
+    manifest.update(
+        {
+            "run_id": "best",
+            "source_run": str(source_run.resolve()),
+            "best_files": {
+                "model": "model.joblib",
+                "result": "result.csv",
+                "submission": "submission.zip",
+                "report": "report.json",
+                "selection": "selection.json",
+            },
+            "submission_path": "submission.zip",
+        }
+    )
+    evidence = source_manifest.get("promotion_evidence", {})
+    if not isinstance(evidence, dict):
+        raise SystemExit("source run 缺少 promotion_evidence")
+    copied_evidence: dict[str, str] = {}
+    for key in ("oof_report", "leakage_report", "pytest_report", "submission_report"):
+        source_evidence = source_run / str(evidence[key])
+        if not source_evidence.is_file():
+            raise SystemExit(f"source run 缺少验证收据: {source_evidence}")
+        target_name = f"promotion_{key}.json"
+        shutil.copy2(source_evidence, candidate_dir / target_name)
+        copied_evidence[key] = target_name
+    manifest["promotion_evidence"] = copied_evidence
     write_json(candidate_dir / "manifest.json", manifest)
     promoted = promote_if_best(candidate_dir, best_dir)
     if promoted:
@@ -105,29 +127,25 @@ def main() -> None:
     parser.add_argument("--best-dir", type=Path, default=Path("results/best"))
     parser.add_argument("--output-dir", type=Path, default=Path("提交这个"))
     parser.add_argument("--source-run", type=Path)
-    parser.add_argument("--pooled-mape", type=float)
-    parser.add_argument("--candidate", default="M1 V2/V3 目标路由")
     parser.add_argument("--report", type=Path)
     parser.add_argument("--selection", type=Path)
     parser.add_argument("--no-open", action="store_true")
     args = parser.parse_args()
     if args.source_run:
-        if args.pooled_mape is None:
-            parser.error("--source-run 必须同时提供 --pooled-mape")
         bootstrap_best(
             args.source_run,
             args.best_dir,
-            pooled_mape=args.pooled_mape,
-            candidate=args.candidate,
             report=args.report,
             selection=args.selection,
         )
     manifest_path = args.best_dir / "manifest.json"
     if not manifest_path.exists():
-        raise SystemExit("没有 results/best/manifest.json，请先指定 --source-run 初始化正式版本")
+        raise SystemExit("没有 results/best/manifest.json，请先提供通过机械收据的正式运行")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if not is_eligible_for_best(manifest):
         raise SystemExit("当前 best 未通过完整运行、泄漏、测试和提交资格检查")
+    if not promotion_evidence_passes(args.best_dir, manifest):
+        raise SystemExit("当前 best 的验证收据内容未通过机械复核")
     archive = args.best_dir / "submission.zip"
     result = args.best_dir / "result.csv"
     if not archive.exists() or not result.exists():
