@@ -11,7 +11,7 @@
 | M3 结构信息 | `generator_rest`、direct/bottom-up、固定融合、对角方差协调、raw-clean-flag 异常双通道 | 至少一个结构候选在完整 OOF 稳定提升 |
 | M4 候选增强 | CatBoost、变化点近期窗口、未来煤气轨迹 OOF 两阶段、低容量动态门控 | 只作为独立 OOF 分支，不默认替换主模型 |
 
-所有实验入口默认写入 `results/raw/runs/<任务_时间戳_进程号>/` 独立目录；报告、预测、模型、日志和逐折 checkpoint 不跨运行混放。只有恢复同一次中断运行时才允许显式复用 `--run-dir`。评分名称为 `competition_mape`，显式登记 epsilon、聚合和缺失策略；官方零值细则未确认前不使用 `official_mape` 名称。目标×步长路由按“单元→目标→全局”三级回缩。MinTrace 仅在对角协调已稳定提升且误差协方差样本充分后启用。
+所有实验入口默认按 `results/raw/runs/{oof,comparisons,training,experiments,audits}/<运行时间>/` 分类写入独立目录；报告、预测、模型、日志和逐折 checkpoint 不跨运行混放。`results/latest/` 保存各类最近运行指针，`results/best/` 只保存满足完整运行、泄漏、测试和提交校验的当前最优模型。最终上传入口固定为 `提交这个/teamname_gas_predict_prelim.zip`。只有恢复同一次中断运行时才允许显式复用 `--run-dir`。评分名称为 `competition_mape`，显式登记 epsilon、聚合和缺失策略；官方零值细则未确认前不使用 `official_mape` 名称。目标×步长路由按“单元→目标→全局”三级回缩。MinTrace 仅在对角协调已稳定提升且误差协方差样本充分后启用。
 
 截至 2026-08-01：M1 已冻结并产出可提交 ZIP；M2/M3 完整 OOF 未超过 M1，M4 smoke 也未超过 M1，均按门槛拒绝晋级。最终冻结模型已通过 250 案例未来扰动审计。后续只做提交复核和必要的环境复现，不再为初赛提交继续扩展模型自由度。
 

@@ -10,7 +10,7 @@ import joblib
 
 from gas_forecast.config import ForecastConfig
 from gas_forecast.data import align_tables
-from gas_forecast.experiments import new_run_dir, write_json
+from gas_forecast.experiments import finalize_run, new_run_dir, write_json
 from gas_forecast.features import build_causal_features, load_price_schedule
 from gas_forecast.leakage import audit_future_perturbations
 
@@ -52,6 +52,15 @@ def main() -> None:
         n_jobs=args.jobs,
     )
     write_json(output, result)
+    finalize_run(
+        run_dir,
+        {
+            "run_type": "audit",
+            "stage": "leakage",
+            "passed": bool(result["passed"]),
+            "report": str(output.relative_to(run_dir)),
+        },
+    )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     if not result["passed"]:
         raise SystemExit(1)

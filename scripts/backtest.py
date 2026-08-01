@@ -8,7 +8,7 @@ from pathlib import Path
 
 from gas_forecast.config import ForecastConfig
 from gas_forecast.data import align_tables
-from gas_forecast.experiments import new_run_dir
+from gas_forecast.experiments import finalize_run, new_run_dir
 from gas_forecast.features import build_causal_features, load_price_schedule
 from gas_forecast.validation import backtest_model
 
@@ -43,6 +43,16 @@ def main() -> None:
     )
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    finalize_run(
+        run_dir,
+        {
+            "run_type": "oof",
+            "stage": args.version,
+            "is_smoke": args.max_folds is not None and args.max_folds < 20,
+            "outer_folds": len(result.get("folds", [])),
+            "report": str(output.relative_to(run_dir)),
+        },
+    )
     print(json.dumps({key: value for key, value in result.items() if key != "folds"}, indent=2))
 
 

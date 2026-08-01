@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from gas_forecast.experiments import new_run_dir, write_json
+from gas_forecast.experiments import finalize_run, new_run_dir, write_json
 from gas_forecast.selection_competition import choose_competition_candidate
 
 
@@ -30,6 +30,18 @@ def main() -> None:
     candidates = {column.removesuffix("_pred"): column for column in columns}
     result = choose_competition_candidate(rows, candidates)
     write_json(output, result)
+    selected = result["selected_candidate"]
+    finalize_run(
+        run_dir,
+        {
+            "run_type": "comparison",
+            "stage": "candidate_selection",
+            "is_smoke": False,
+            "pooled_mape": float(result["reports"][selected]["pooled_mape"]),
+            "candidate": selected,
+            "report": str(output.relative_to(run_dir)),
+        },
+    )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

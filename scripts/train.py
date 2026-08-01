@@ -6,7 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
-from gas_forecast.experiments import new_run_dir, write_json
+from gas_forecast.experiments import finalize_run, new_run_dir, write_json
 from gas_forecast.workflow import train_model
 
 
@@ -45,6 +45,16 @@ def main() -> None:
         "jobs": args.jobs,
     }
     write_json(run_dir / "summary.json", summary)
+    finalize_run(
+        run_dir,
+        {
+            "run_type": "training",
+            "stage": version,
+            "is_smoke": False,
+            "model": str(output.relative_to(run_dir)),
+            "summary": "summary.json",
+        },
+    )
     print(f"{version} 模型已保存: {output}")
 
 

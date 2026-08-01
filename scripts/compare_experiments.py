@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from gas_forecast.experiments import new_run_dir, write_json
+from gas_forecast.experiments import finalize_run, new_run_dir, write_json
 from gas_forecast.selection_competition import choose_competition_candidate
 
 
@@ -64,6 +64,19 @@ def main() -> None:
         "selection": result,
     }
     write_json(run_dir / "report.json", payload)
+    selected = result["selected_candidate"]
+    finalize_run(
+        run_dir,
+        {
+            "run_type": "comparison",
+            "stage": "cross_experiment",
+            "is_smoke": False,
+            "pooled_mape": float(result["reports"][selected]["pooled_mape"]),
+            "candidate": selected,
+            "report": "report.json",
+            "prediction": "merged_oof.csv",
+        },
+    )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

@@ -11,7 +11,12 @@ from pathlib import Path
 
 from gas_forecast.config import ForecastConfig
 from gas_forecast.data import align_tables
-from gas_forecast.experiments import build_experimental_oof, new_run_dir, register_experiment
+from gas_forecast.experiments import (
+    build_experimental_oof,
+    finalize_run,
+    new_run_dir,
+    register_experiment,
+)
 from gas_forecast.features import build_causal_features, load_price_schedule
 
 
@@ -88,6 +93,22 @@ def main() -> None:
         config=config,
         training_command=" ".join(sys.argv),
         training_time=duration,
+    )
+    record = payload["record"]
+    pooled = record.get("pooled_mape", {})
+    best_mape = min(pooled.values()) if pooled else None
+    finalize_run(
+        run_dir,
+        {
+            "run_type": "experiment",
+            "stage": args.experiment_id,
+            "is_smoke": args.max_folds is not None and args.max_folds < 20,
+            "outer_folds": record.get("outer_folds"),
+            "pooled_mape": best_mape,
+            "best_candidate": payload.get("best_candidate"),
+            "report": str(report.relative_to(run_dir)),
+            "oof": str(output.relative_to(run_dir)),
+        },
     )
     print(json.dumps(payload["record"], ensure_ascii=False, indent=2))
 

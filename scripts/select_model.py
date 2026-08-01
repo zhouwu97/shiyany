@@ -9,7 +9,7 @@ from pathlib import Path
 from gas_forecast.config import ForecastConfig
 from gas_forecast.data import align_tables
 from gas_forecast.features import build_causal_features, load_price_schedule
-from gas_forecast.experiments import new_run_dir
+from gas_forecast.experiments import finalize_run, new_run_dir
 from gas_forecast.orchestration import audit_future_perturbation
 from gas_forecast.selection import choose_version
 
@@ -52,6 +52,16 @@ def main() -> None:
     decision["test_labels_used"] = False
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(decision, ensure_ascii=False, indent=2), encoding="utf-8")
+    finalize_run(
+        run_dir,
+        {
+            "run_type": "comparison",
+            "stage": "model_selection",
+            "is_smoke": False,
+            "candidate": decision.get("selected_version"),
+            "report": str(output.relative_to(run_dir)),
+        },
+    )
     print(json.dumps(decision, ensure_ascii=False, indent=2))
 
 

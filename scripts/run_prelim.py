@@ -6,7 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
-from gas_forecast.experiments import new_run_dir
+from gas_forecast.experiments import finalize_run, new_run_dir
 from gas_forecast.submission import (
     export_legacy_json,
     package_submission,
@@ -61,6 +61,19 @@ def main() -> None:
     }
     metrics_path.parent.mkdir(parents=True, exist_ok=True)
     metrics_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    finalize_run(
+        run_dir,
+        {
+            "run_type": "training",
+            "stage": "prelim",
+            "is_smoke": False,
+            "submission_valid": bool(validation.get("valid", True)),
+            "model": str(model_path.relative_to(run_dir)),
+            "result": str(result_path.relative_to(run_dir)),
+            "submission": str(archive_path.relative_to(run_dir)),
+            "summary": str(metrics_path.relative_to(run_dir)),
+        },
+    )
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 
 

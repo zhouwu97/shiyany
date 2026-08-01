@@ -138,7 +138,7 @@ V2 相对 V1：
 
 ## 2026-08-01 M2/M3 完整 OOF 验收
 
-使用与 M1 相同的 20 个外层时间折、5 个 expanding 内层折和 120 分钟 purge，8 个 worker 并行，结果保存在 `results/raw/runs/2026-08-01_00-05-06_M2M3完整实验结果`。完整运行耗时 29.7 分钟，所有折均有 checkpoint。
+使用与 M1 相同的 20 个外层时间折、5 个 expanding 内层折和 120 分钟 purge，8 个 worker 并行，结果保存在 `results/raw/runs/experiments/m2_m3/2026-08-01_00-05-06`。完整运行耗时 29.7 分钟，所有折均有 checkpoint。
 
 | 候选 | pooled MAPE |
 | --- | ---: |
@@ -150,11 +150,11 @@ V2 相对 V1：
 | struct diagonal | 5.5354% |
 | OOF residual LightGBM | 7.4808% |
 
-M1 的 `m1_v2_v3_target` 为 5.3062%，因此 M2/M3 没有达到晋级门槛，正式选择器保持 M1；机械比较记录在 `results/raw/runs/2026-08-01_00-35-21_跨实验比较结果`。
+M1 的 `m1_v2_v3_target` 为 5.3062%，因此 M2/M3 没有达到晋级门槛，正式选择器保持 M1；机械比较记录在 `results/raw/runs/comparisons/2026-08-01_00-35-21`。
 
 ## 2026-08-01 M4 候选 smoke
 
-在最终 blind 折执行 CatBoost 和第一阶段 OOF 煤气轨迹两候选，运行目录为 `results/raw/runs/2026-08-01_00-38-03_M4冒烟结果`，耗时 233.5 秒。
+在最终 blind 折执行 CatBoost 和第一阶段 OOF 煤气轨迹两候选，运行目录为 `results/raw/runs/experiments/m4/2026-08-01_00-38-03`，耗时 233.5 秒。
 
 | 候选 | blind pooled MAPE | 结论 |
 | --- | ---: | --- |
@@ -166,7 +166,11 @@ CatBoost 虽优于新 cross-fitting 候选，但未超过冻结的 M1；煤气�
 
 ## 2026-08-01 最终模型泄漏审计
 
-对冻结模型 `results/raw/runs/2026-07-31_23-53-00_正式模型结果/model.joblib` 执行 50 个起点、5 种未来扰动（extreme、shuffle、null、single_field、delete_future），共 250 个案例，8 worker。结果目录为 `results/raw/runs/2026-08-01_00-43-00_泄漏审计结果`，`passed=true`、失败数为 0。
+对冻结模型 `results/raw/runs/training/2026-07-31_23-53-00/model.joblib` 执行 50 个起点、5 种未来扰动（extreme、shuffle、null、single_field、delete_future），共 250 个案例，8 worker。结果目录为 `results/raw/runs/audits/leakage/2026-08-01_00-43-00`，`passed=true`、失败数为 0。
+
+## 正式提交入口
+
+当前正式最优模型已复制到 `results/best/`，唯一提交目录为 `提交这个/`。上传 `提交这个/teamname_gas_predict_prelim.zip`，该 ZIP 已校验为只包含 `result.csv`；`result.csv`、模型文件和所有历史运行目录均不应上传。
 
 ## 并行与复现记录
 

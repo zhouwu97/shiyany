@@ -55,3 +55,9 @@
 - 最终冻结模型完成 50 起点×5 扰动、250 案例模型级泄漏审计，`passed=true` 且无失败。
 - 训练并行改为外层 worker 与树模型线程显式配额，默认按逻辑核心数自动均分；每次实验保留独立 run 目录和 fold checkpoint。
 - 当前状态：M1 正式冻结；M2、M3、M4 完成验收并拒绝晋级；泄漏审计和全量测试完成。
+
+## 2026-08-01 结果归档与提交入口
+
+- 历史运行按 `oof`、`comparisons`、`training`、`experiments`、`audits` 分区归档；`results/latest/` 只保存各类型最近一次运行指针。
+- 正式最优模型固定在 `results/best/`，只有完整运行、非 smoke、泄漏通过、测试通过、提交校验通过且 pooled MAPE 更低的候选才允许晋级。
+- 用户唯一提交入口为 `提交这个/teamname_gas_predict_prelim.zip`；`scripts/show_best.py` 查询当前 best，`scripts/prepare_submission.py` 负责校验和复制，不允许从历史 run 目录手工挑选 ZIP。

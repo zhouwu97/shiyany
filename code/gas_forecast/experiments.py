@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import platform
+import shutil
 import subprocess
 import time
 from dataclasses import asdict, dataclass, replace
@@ -47,6 +48,33 @@ class ExperimentRecord:
     python_version: str
 
 
+RESULTS_ROOT = Path("results")
+
+
+def _run_partition(prefix: str) -> tuple[tuple[str, ...], str]:
+    """根据任务前缀决定历史归档分区和 latest 文件名。"""
+
+    if prefix in {"legacy_oof", "backtest_v1", "backtest_v2", "backtest_v25", "backtest_v3"}:
+        return ("raw", "runs", "oof"), "oof"
+    if prefix.startswith("compare_") or prefix in {"select_model", "select_candidate"}:
+        return ("raw", "runs", "comparisons"), "comparison"
+    if prefix in {"train_model", "prelim_pipeline"}:
+        return ("raw", "runs", "training"), "training"
+    if prefix.startswith("experiment_"):
+        return ("raw", "runs", "experiments"), "experiment"
+    if prefix == "fit_stacker":
+        return ("raw", "runs", "experiments"), "experiment"
+    if prefix == "leakage_audit":
+        return ("raw", "runs", "audits", "leakage"), "audit"
+    if prefix in {"data_audit", "preprocess"}:
+        return ("raw", "runs", "audits", "data"), "audit"
+    if prefix in {"evaluate_frozen", "compare_reproduction"}:
+        return ("raw", "runs", "audits"), "audit"
+    if prefix in {"legacy_pipeline", "competition_pipeline"}:
+        return ("raw", "runs", "experiments"), "experiment"
+    return ("raw", "runs", "other"), "experiment"
+
+
 def write_json(path: str | Path, payload: dict[str, object]) -> None:
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -56,37 +84,131 @@ def write_json(path: str | Path, payload: dict[str, object]) -> None:
 
 
 def new_run_dir(root: str | Path, prefix: str) -> Path:
-    """为每次实验创建日期优先、便于浏览的独立结果目录。"""
+    """为每次运行创建分类归档目录，并登记初始 manifest。"""
 
-    labels = {
-        "legacy_oof": "OOF结果",
-        "compare_candidates": "候选比较结果",
-        "compare_experiments": "实验比较结果",
-        "train_model": "模型训练结果",
-        "leakage_audit": "泄漏审计结果",
-        "data_audit": "数据审计结果",
-        "preprocess": "数据预处理结果",
-        "fit_stacker": "融合训练结果",
-        "select_candidate": "候选选择结果",
-        "select_model": "模型选择结果",
-        "compare_reproduction": "复现比较结果",
-        "evaluate_frozen": "冻结评估结果",
-        "legacy_pipeline": "旧流水线结果",
-        "competition_pipeline": "竞赛流水线结果",
-        "prelim_pipeline": "初赛流水线结果",
-    }
-    if prefix.startswith("backtest_"):
-        label = f"{prefix.removeprefix('backtest_').upper()}回测结果"
-    elif prefix.startswith("experiment_"):
-        label = "增强实验结果"
+    partition, run_type = _run_partition(prefix)
+    root_path = Path(root)
+    if root_path.name == "runs" and root_path.parent.name == "raw":
+        base = root_path.parent.parent
     else:
-        label = labels.get(prefix, "实验结果")
-    timestamp = pd.Timestamp.now(tz="Asia/Shanghai").strftime("%Y-%m-%d_%H-%M-%S-%f")[:-3]
-    output = Path(root) / f"{timestamp}_{label}"
+        base = root_path
+    timestamp = pd.Timestamp.now(tz="Asia/Shanghai").strftime("%Y%m%d_%H%M%S_%f")[:-3]
+    output = base.joinpath(*partition, timestamp)
     if output.exists():
-        output = Path(root) / f"{timestamp}_{os.getpid()}_{label}"
+        output = output.with_name(f"{timestamp}_{os.getpid()}")
+    output.parent.mkdir(parents=True, exist_ok=True)
     output.mkdir(parents=True, exist_ok=False)
+    write_json(
+        output / "manifest.json",
+        {
+            "run_id": output.name,
+            "run_type": run_type,
+            "run_prefix": prefix,
+            "status": "running",
+            "is_smoke": False,
+            "created_at": pd.Timestamp.now(tz="Asia/Shanghai").isoformat(),
+            "git_commit": current_commit(),
+        },
+    )
     return output
+
+
+def _latest_name(run_type: str) -> str:
+    return {
+        "oof": "oof.json",
+        "comparison": "comparison.json",
+        "training": "training.json",
+        "experiment": "experiment.json",
+        "audit": "audit.json",
+    }.get(run_type, "run.json")
+
+
+def finalize_run(run_dir: str | Path, manifest: dict[str, object]) -> dict[str, object]:
+    """写入完成状态，并更新 results/latest 下的分类指针。"""
+
+    run_path = Path(run_dir)
+    payload = dict(manifest)
+    payload.setdefault("run_id", run_path.name)
+    payload.setdefault("status", "completed")
+    payload["status"] = "completed"
+    payload["finished_at"] = pd.Timestamp.now(tz="Asia/Shanghai").isoformat()
+    payload["run_dir"] = str(run_path.resolve())
+    write_json(run_path / "manifest.json", payload)
+    run_type = str(payload.get("run_type", "experiment"))
+    latest_path = RESULTS_ROOT / "latest" / _latest_name(run_type)
+    write_json(latest_path, payload)
+    return payload
+
+
+def is_eligible_for_best(manifest: dict[str, object]) -> bool:
+    """判断运行是否满足正式 best 候选的机械门槛。"""
+
+    required = (
+        manifest.get("status") == "completed"
+        and not bool(manifest.get("is_smoke", False))
+        and bool(manifest.get("leakage_passed", False))
+        and bool(manifest.get("tests_passed", False))
+        and bool(manifest.get("submission_valid", False))
+    )
+    files = manifest.get("best_files", {})
+    required_files = isinstance(files, dict) and all(
+        isinstance(files.get(key), str) for key in ("model", "result", "submission")
+    )
+    mape = manifest.get("pooled_mape")
+    return bool(required and required_files and isinstance(mape, (int, float)) and float(mape) >= 0)
+
+
+def promote_if_best(run_dir: str | Path, best_dir: str | Path) -> bool:
+    """按 pooled MAPE 比较并原子更新 best 目录，不静默覆盖较优结果。"""
+
+    run_path = Path(run_dir)
+    best_path = Path(best_dir)
+    manifest_path = run_path / "manifest.json"
+    if not manifest_path.exists():
+        return False
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not is_eligible_for_best(manifest):
+        return False
+    current_summary = best_path / "summary.json"
+    if current_summary.exists():
+        current = json.loads(current_summary.read_text(encoding="utf-8"))
+        current_mape = current.get("pooled_mape")
+        if isinstance(current_mape, (int, float)) and float(current_mape) <= float(manifest["pooled_mape"]):
+            return False
+    temp_path = best_path.parent / ".best_tmp"
+    if temp_path.exists():
+        shutil.rmtree(temp_path)
+    temp_path.mkdir(parents=True, exist_ok=False)
+    files = manifest.get("best_files", {})
+    if not isinstance(files, dict):
+        files = {}
+    summary = dict(manifest)
+    summary["source_run"] = str(run_path.resolve())
+    summary_path = temp_path / "summary.json"
+    write_json(summary_path, summary)
+    write_json(temp_path / "manifest.json", summary)
+    for target_name, source_name in {
+        "model.joblib": files.get("model", "model.joblib"),
+        "result.csv": files.get("result", "result.csv"),
+        "submission.zip": files.get("submission", "submission.zip"),
+        "report.json": files.get("report", "report.json"),
+        "selection.json": files.get("selection", "selection.json"),
+    }.items():
+        if not isinstance(source_name, str):
+            continue
+        source = run_path / source_name
+        if source.exists() and source.is_file():
+            shutil.copy2(source, temp_path / target_name)
+    best_path.parent.mkdir(parents=True, exist_ok=True)
+    backup_path = best_path.parent / ".best_previous"
+    if backup_path.exists():
+        shutil.rmtree(backup_path)
+    if best_path.exists():
+        best_path.replace(backup_path)
+    temp_path.replace(best_path)
+    if backup_path.exists():
+        shutil.rmtree(backup_path)
+    return True
 
 
 def sha256(path: str | Path) -> str:

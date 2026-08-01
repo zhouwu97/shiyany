@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from gas_forecast.experiments import new_run_dir, write_json
+from gas_forecast.experiments import finalize_run, new_run_dir, write_json
 from gas_forecast.routing import leave_one_fold_out_route
 from gas_forecast.selection_competition import choose_competition_candidate
 
@@ -51,6 +51,20 @@ def main() -> None:
     routed.to_csv(output, index=False, encoding="utf-8")
     payload = {"selection": selection, "routing": route_report, "rows": int(len(routed))}
     write_json(report, payload)
+    selected = selection["selected_candidate"]
+    selected_mape = selection["reports"][selected]["pooled_mape"]
+    finalize_run(
+        run_dir,
+        {
+            "run_type": "comparison",
+            "stage": "M1",
+            "is_smoke": False,
+            "pooled_mape": float(selected_mape),
+            "candidate": selected,
+            "report": str(report.relative_to(run_dir)),
+            "prediction": str(output.relative_to(run_dir)),
+        },
+    )
     print(json.dumps(payload["selection"], ensure_ascii=False, indent=2))
 
 

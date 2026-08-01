@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from gas_forecast.data import align_tables
-from gas_forecast.experiments import new_run_dir
+from gas_forecast.experiments import finalize_run, new_run_dir
 
 
 def parse_args() -> argparse.Namespace:
@@ -28,6 +28,10 @@ def main() -> None:
     print(text)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(text + "\n", encoding="utf-8")
+    finalize_run(
+        run_dir,
+        {"run_type": "audit", "stage": "data", "passed": True, "report": "report.json"},
+    )
 
 
 if __name__ == "__main__":

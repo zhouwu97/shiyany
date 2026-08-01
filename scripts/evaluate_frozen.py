@@ -12,7 +12,7 @@ import pandas as pd
 
 from gas_forecast.config import ForecastConfig
 from gas_forecast.data import align_tables
-from gas_forecast.experiments import new_run_dir
+from gas_forecast.experiments import finalize_run, new_run_dir
 
 
 def main() -> None:
@@ -53,6 +53,10 @@ def main() -> None:
     }
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    finalize_run(
+        run_dir,
+        {"run_type": "audit", "stage": "frozen_score", "passed": True, "report": "report.json"},
+    )
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 
 

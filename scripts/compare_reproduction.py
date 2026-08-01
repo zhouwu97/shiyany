@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from gas_forecast.freeze import compare_reproductions
-from gas_forecast.experiments import new_run_dir
+from gas_forecast.experiments import finalize_run, new_run_dir
 
 
 def main() -> None:
@@ -24,6 +24,15 @@ def main() -> None:
     comparison = compare_reproductions(reference, candidate)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(comparison, ensure_ascii=False, indent=2), encoding="utf-8")
+    finalize_run(
+        run_dir,
+        {
+            "run_type": "audit",
+            "stage": "reproduction",
+            "passed": bool(comparison["identical"]),
+            "report": str(output.relative_to(run_dir)),
+        },
+    )
     print(json.dumps(comparison, ensure_ascii=False, indent=2))
     if not comparison["identical"]:
         raise SystemExit("复现产物未逐项一致")

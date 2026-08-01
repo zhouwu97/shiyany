@@ -11,7 +11,7 @@ import numpy as np
 from gas_forecast.config import ForecastConfig
 from gas_forecast.config import legacy_forecast_config
 from gas_forecast.data import align_tables
-from gas_forecast.experiments import new_run_dir, write_json
+from gas_forecast.experiments import finalize_run, new_run_dir, write_json
 from gas_forecast.features import build_causal_features, load_price_schedule
 from gas_forecast.freeze import sha256_file
 from gas_forecast.oof import build_legacy_oof, write_oof
@@ -227,6 +227,23 @@ def run_automated_pipeline(
         "manual_prediction_edits": False,
     }
     _write_json(summary_path, summary)
+    selected_report = reports.get(selected_version, {})
+    finalize_run(
+        run_path,
+        {
+            "run_type": "experiment",
+            "stage": "legacy_pipeline",
+            "is_smoke": max_folds is not None and max_folds < minimum_folds,
+            "candidate": selected_version,
+            "pooled_mape": selected_report.get("mean_mape"),
+            "leakage_passed": bool(perturbation["passed"]),
+            "tests_passed": False,
+            "submission_valid": bool(validation.get("valid", True)),
+            "model": str(model_path.relative_to(run_path)),
+            "result": str(result_path.relative_to(run_path)),
+            "submission": str(archive_path.relative_to(run_path)),
+        },
+    )
     return summary
 
 
@@ -356,4 +373,26 @@ def run_competition_pipeline(
         "manual_prediction_edits": False,
     }
     write_json(run_path / "summary.json", summary)
+    selected_report = selection.get("reports", {}).get(selected, {})
+    finalize_run(
+        run_path,
+        {
+            "run_type": "experiment",
+            "stage": "M1",
+            "is_smoke": max_folds is not None and max_folds < minimum_folds,
+            "outer_folds": len(result.report["folds"]),
+            "pooled_mape": selected_report.get("pooled_mape"),
+            "candidate": selected,
+            "leakage_passed": bool(perturbation["passed"]),
+            "tests_passed": False,
+            "submission_valid": bool(validation.get("valid", True)),
+            "best_files": {
+                "model": "model.joblib",
+                "result": "submission/s_result.csv",
+                "submission": "submission.zip",
+                "report": "oof_legacy_report.json",
+                "selection": "selection.json",
+            },
+        },
+    )
     return summary

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from gas_forecast.config import ForecastConfig
 from gas_forecast.data import align_tables
-from gas_forecast.experiments import new_run_dir, write_json
+from gas_forecast.experiments import finalize_run, new_run_dir, write_json
 from gas_forecast.features import build_causal_features, load_price_schedule
 from gas_forecast.oof import SUPPORTED_LEGACY_MODELS, build_legacy_oof, write_oof
 
@@ -58,6 +58,18 @@ def main() -> None:
     )
     write_oof(result, output, report)
     write_json(report, result.report)
+    finalize_run(
+        run_dir,
+        {
+            "run_type": "oof",
+            "stage": "M1",
+            "is_smoke": args.max_folds is not None and args.max_folds < 20,
+            "outer_folds": len(result.report["folds"]),
+            "pooled_mape": float(result.report.get("pooled_mape", 0.0)),
+            "report": str(report.relative_to(run_dir)),
+            "oof": str(output.relative_to(run_dir)),
+        },
+    )
     print(json.dumps(result.report, ensure_ascii=False, indent=2))
 
 

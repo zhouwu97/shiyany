@@ -228,6 +228,9 @@ runs/
 .tmp/
 results/raw/*
 !results/raw/.gitkeep
+results/best/
+results/latest/
+提交这个/
 *.pdf
 *.zip
 注意事项.txt

@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from gas_forecast.experiments import new_run_dir, write_json
+from gas_forecast.experiments import finalize_run, new_run_dir, write_json
 from gas_forecast.stacking import fit_simplex_state
 
 
@@ -52,6 +52,15 @@ def main() -> None:
         }
     payload = {"weights": weights, "reporting_policy": "weights_only_no_in_sample_score"}
     write_json(output, payload)
+    finalize_run(
+        run_dir,
+        {
+            "run_type": "experiment",
+            "stage": "stacker",
+            "is_smoke": False,
+            "weights": str(output.relative_to(run_dir)),
+        },
+    )
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 
 

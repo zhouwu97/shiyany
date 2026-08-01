@@ -78,7 +78,16 @@ python scripts/run_experiment.py --data-dir "data/raw/official/初赛-参赛者�
 python scripts/audit_leakage.py --data-dir "data/raw/official/初赛-参赛者使用" --model <model> --jobs 8
 ```
 
-所有命令默认写入 `results/raw/runs/<类型_时间戳_进程号>/`。运行目录包含逐行 OOF、报告、manifest、折级 checkpoint、模型或提交产物；指定同一 `--run-dir` 可从已完成折继续。
+所有命令默认写入 `results/raw/runs/{oof,comparisons,training,experiments,audits}/<运行时间>/` 分类目录。每个运行目录包含报告、manifest、日志和 checkpoint；指定同一 `--run-dir` 可从已完成折继续。最近一次各类运行的指针在 `results/latest/`。
+
+正式提交只执行：
+
+```powershell
+python scripts/show_best.py
+python scripts/prepare_submission.py
+```
+
+第二条命令会校验 `results/best`、ZIP 内容和 192×16 预测，并打开 `提交这个/`。平台只上传 `提交这个/teamname_gas_predict_prelim.zip`。
 
 自动调参不属于正式默认入口。需要开展参数搜索时，应使用独立训练期实验目录、同一套滚动折和有限候选集合，完成后再把冻结配置交给本入口验收。
 
@@ -109,7 +118,7 @@ python scripts/backtest.py --data-dir "data/raw/official/初赛-参赛者使用"
 python scripts/select_model.py --data-dir "data/raw/official/初赛-参赛者使用" --v1 <v1_run>/report.json --v2 <v2_run>/report.json
 ```
 
-所有实验入口默认在 `results/raw/runs/` 下新建带任务名、毫秒时间戳和进程号的独立目录。目录内保存该次报告、预测、模型、日志和 checkpoint；只有恢复同一次中断运行时才显式传入原 `--run-dir`。
+正式模型只认 `results/best/`。运行 `python scripts/show_best.py` 查看当前最优版本，运行 `python scripts/prepare_submission.py` 生成唯一提交目录 `提交这个/`；上传其中唯一的 `teamname_gas_predict_prelim.zip`，不要从历史 run 目录自行挑选文件。
 
 若平台仍要求数据字典中的旧版 JSON，可单独执行：
 
