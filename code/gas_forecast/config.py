@@ -20,6 +20,8 @@ class FeatureConfig:
     enable_anomaly_features: bool = True
     enable_physical_features: bool = True
     enable_long_cycle_features: bool = True
+    enable_target_aligned_features: bool = False
+    target_aligned_cycle_days: tuple[int, ...] = (1, 2, 3, 7)
 
 
 @dataclass(frozen=True)
@@ -89,5 +91,19 @@ def legacy_forecast_config() -> ForecastConfig:
             enable_anomaly_features=False,
             enable_physical_features=False,
             enable_long_cycle_features=False,
+        ),
+    )
+
+
+def horizon_ridge_forecast_config() -> ForecastConfig:
+    """返回目标时刻对齐 Ridge 使用的低自由度配置。"""
+
+    config = legacy_forecast_config()
+    return replace(
+        config,
+        feature=replace(
+            config.feature,
+            enable_target_aligned_features=True,
+            enable_long_cycle_features=True,
         ),
     )

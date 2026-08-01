@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 import ruptures as rpt
-from catboost import CatBoostRegressor
+from catboost import CatBoostRegressor, Pool
 from sklearn.impute import SimpleImputer
 
 from gas_forecast.config import ForecastConfig
@@ -92,7 +92,9 @@ class CatBoostDeltaForecaster:
                 weights = 1.0 / np.clip(np.abs(future_absolute), lower, upper)
                 probe = CatBoostRegressor(
                     loss_function="MAE",
-                    eval_metric="MAPE",
+                    # 增量标签上的 MAPE 与比赛绝对负荷 MAPE 不同；
+                    # 带绝对负荷权重的 MAE 才是可解释的早停近似。
+                    eval_metric="MAE",
                     iterations=self.config.model.catboost_iterations,
                     depth=self.config.model.catboost_depth,
                     learning_rate=self.config.model.catboost_learning_rate,
@@ -106,7 +108,11 @@ class CatBoostDeltaForecaster:
                     matrix[:split],
                     y[column].to_numpy()[:split],
                     sample_weight=weights[:split],
-                    eval_set=(matrix[split:], y[column].to_numpy()[split:]),
+                    eval_set=Pool(
+                        matrix[split:],
+                        y[column].to_numpy()[split:],
+                        weight=weights[split:],
+                    ),
                     early_stopping_rounds=self.config.model.catboost_early_stopping_rounds,
                     verbose=False,
                 )

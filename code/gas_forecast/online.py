@@ -1,0 +1,334 @@
+"""严格逐时刻模拟的在线预测校准。"""
+
+from __future__ import annotations
+
+from collections import defaultdict, deque
+from dataclasses import dataclass
+
+import numpy as np
+import pandas as pd
+
+
+def _prediction_column(target: str, horizon: int) -> str:
+    return f"{target}_t+{15 * horizon}_pred"
+
+
+@dataclass(frozen=True)
+class MaturedForecast:
+    target: str
+    horizon: int
+    anchor: float
+    base_prediction: float
+    published_prediction: float
+
+
+class OnlineForecastCalibrator:
+    """一次只推进一个时间点的因果校准状态机。
+
+    ``observe`` 先结算已经到达目标时刻的历史预测，``transform`` 再修正
+    当前预测，``register`` 最后登记本次发布结果。调用顺序由
+    :meth:`walk_forward` 固定，避免整块预先计算误差。
+    """
+
+    def __init__(
+        self,
+        horizons: tuple[int, ...],
+        *,
+        mode: str = "bias",
+        half_life: float = 16.0,
+        bias_clip: float = 12.0,
+        gain_clip: tuple[float, float] = (0.0, 1.3),
+        vintage_weight: float = 0.25,
+        history_size: int = 64,
+    ) -> None:
+        if mode not in {"bias", "gain", "vintage"}:
+            raise ValueError("在线校准模式必须是 bias、gain 或 vintage")
+        if half_life <= 0 or history_size < 1:
+            raise ValueError("half_life 和 history_size 必须为正数")
+        if not 0.0 <= vintage_weight <= 1.0:
+            raise ValueError("vintage_weight 必须位于 [0, 1]")
+        self.horizons = tuple(horizons)
+        self.mode = mode
+        self.decay = float(np.exp(np.log(0.5) / half_life))
+        self.bias_clip = float(bias_clip)
+        self.gain_clip = tuple(float(value) for value in gain_clip)
+        self.vintage_weight = float(vintage_weight)
+        self.pending: dict[pd.Timestamp, list[MaturedForecast]] = defaultdict(list)
+        self.vintages: dict[pd.Timestamp, dict[str, deque[float]]] = defaultdict(
+            lambda: defaultdict(lambda: deque(maxlen=history_size))
+        )
+        self.bias: dict[tuple[str, int], float] = defaultdict(float)
+        self.gain_numerator: dict[tuple[str, str], float] = defaultdict(float)
+        self.gain_denominator: dict[tuple[str, str], float] = defaultdict(float)
+
+    def _gain_group(self, horizon: int) -> str:
+        return "short" if self.horizons.index(horizon) < len(self.horizons) // 2 else "long"
+
+    def observe(self, timestamp: pd.Timestamp, actual: pd.Series) -> None:
+        """只结算当前时刻已经揭晓的历史预测。"""
+
+        timestamp = pd.Timestamp(timestamp)
+        matured = self.pending.pop(timestamp, [])
+        for item in matured:
+            value = float(actual[item.target])
+            key = (item.target, item.horizon)
+            if self.mode == "bias":
+                error = value - item.published_prediction
+                self.bias[key] = float(
+                    np.clip(
+                        self.decay * self.bias[key] + (1.0 - self.decay) * error,
+                        -self.bias_clip,
+                        self.bias_clip,
+                    )
+                )
+            elif self.mode == "gain":
+                delta = item.base_prediction - item.anchor
+                group = (item.target, self._gain_group(item.horizon))
+                weight = 1.0 / max(abs(value), 1.0)
+                self.gain_numerator[group] = (
+                    self.decay * self.gain_numerator[group] + (1.0 - self.decay) * weight * delta * (value - item.anchor)
+                )
+                self.gain_denominator[group] = (
+                    self.decay * self.gain_denominator[group] + (1.0 - self.decay) * weight * delta * delta
+                )
+
+    def transform(
+        self,
+        timestamp: pd.Timestamp,
+        target: str,
+        horizon: int,
+        anchor: float,
+        base_prediction: float,
+    ) -> float:
+        """使用截至当前时刻的状态修正一个基础预测。"""
+
+        timestamp = pd.Timestamp(timestamp)
+        prediction = float(base_prediction)
+        if self.mode == "bias":
+            prediction += self.bias[(target, horizon)]
+        elif self.mode == "gain":
+            group = (target, self._gain_group(horizon))
+            denominator = self.gain_denominator[group]
+            gain = 1.0 if denominator <= 1e-12 else self.gain_numerator[group] / denominator
+            gain = float(np.clip(gain, *self.gain_clip))
+            prediction = float(anchor + gain * (base_prediction - anchor))
+        elif self.mode == "vintage":
+            target_time = timestamp + pd.Timedelta(minutes=15 * horizon)
+            previous = self.vintages[target_time][target]
+            if previous:
+                prediction = (1.0 - self.vintage_weight) * prediction + self.vintage_weight * float(
+                    np.mean(previous)
+                )
+        return prediction
+
+    def register(
+        self,
+        timestamp: pd.Timestamp,
+        target: str,
+        horizon: int,
+        anchor: float,
+        base_prediction: float,
+        published_prediction: float,
+    ) -> None:
+        """登记本次发布的预测，等待目标时刻揭晓后再使用。"""
+
+        timestamp = pd.Timestamp(timestamp)
+        target_time = timestamp + pd.Timedelta(minutes=15 * horizon)
+        self.pending[target_time].append(
+            MaturedForecast(
+                target=target,
+                horizon=horizon,
+                anchor=float(anchor),
+                base_prediction=float(base_prediction),
+                published_prediction=float(published_prediction),
+            )
+        )
+        self.vintages[target_time][target].append(float(published_prediction))
+
+    def walk_forward(
+        self,
+        base_predictions: pd.DataFrame,
+        current: pd.DataFrame,
+        targets: tuple[str, ...],
+    ) -> pd.DataFrame:
+        """逐行生成校准结果，当前行真实值只在该行开始时可用。"""
+
+        if not base_predictions.index.equals(current.index):
+            raise ValueError("基础预测和当前观测必须使用相同时间索引")
+        output = base_predictions.copy()
+        for timestamp in base_predictions.index:
+            self.observe(timestamp, current.loc[timestamp])
+            for target in targets:
+                anchor = float(current.loc[timestamp, target])
+                for horizon in self.horizons:
+                    column = _prediction_column(target, horizon)
+                    base = float(base_predictions.loc[timestamp, column])
+                    published = self.transform(timestamp, target, horizon, anchor, base)
+                    output.loc[timestamp, column] = published
+                    self.register(timestamp, target, horizon, anchor, base, published)
+        if not np.isfinite(output.to_numpy()).all():
+            raise ValueError("在线校准结果包含非有限值")
+        return output
+
+
+def apply_online_calibration(
+    base_predictions: pd.DataFrame,
+    current: pd.DataFrame,
+    targets: tuple[str, ...],
+    horizons: tuple[int, ...],
+    *,
+    mode: str = "bias",
+    **kwargs: object,
+) -> pd.DataFrame:
+    """便捷的冷启动 walk-forward 入口。"""
+
+    calibrator = OnlineForecastCalibrator(horizons, mode=mode, **kwargs)
+    return calibrator.walk_forward(base_predictions, current, targets)
+
+
+def apply_online_calibration_to_oof(
+    rows: pd.DataFrame,
+    base_column: str,
+    targets: tuple[str, ...],
+    horizons: tuple[int, ...],
+    *,
+    mode: str = "bias",
+    output_column: str | None = None,
+    warmup_rows: int = 0,
+    **kwargs: object,
+) -> pd.DataFrame:
+    """将在线校准严格应用到 OOF 长表。
+
+    每个外层折都从空状态开始，按 ``origin_time`` 逐行推进。状态只读取
+    ``current_value``，而不是 OOF 行中的 ``actual``，因此未来真实值不会
+    参与当前时刻的校准。``warmup_rows`` 用于热启动评估：每折前若干个
+    origin 仅用于填充状态，并通过标记列排除出正式评分。
+    """
+
+    required = {
+        "fold",
+        "origin_time",
+        "target",
+        "horizon",
+        "actual",
+        "current_value",
+        base_column,
+    }
+    missing = sorted(required.difference(rows.columns))
+    if missing:
+        raise ValueError(f"OOF 长表缺少在线校准字段: {missing}")
+    if not targets or not horizons:
+        raise ValueError("在线校准至少需要一个目标和一个预测步长")
+    if not isinstance(warmup_rows, int) or warmup_rows < 0:
+        raise ValueError("warmup_rows 必须是非负整数")
+
+    output_column = output_column or (
+        f"{base_column.removesuffix('_pred')}_online_{mode}_pred"
+    )
+    warmup_column = f"{output_column}_is_warmup"
+    fallback_column = f"{output_column}_is_fallback"
+    if (
+        output_column in rows.columns
+        or warmup_column in rows.columns
+        or fallback_column in rows.columns
+    ):
+        raise ValueError(f"OOF 长表已存在在线校准输出列: {output_column}")
+
+    work = rows.reset_index(drop=True).copy()
+    work["origin_time"] = pd.to_datetime(work["origin_time"])
+    work[output_column] = pd.to_numeric(work[base_column], errors="raise")
+    work[warmup_column] = False
+    work[fallback_column] = False
+    expected_pairs = {(target, 15 * horizon) for target in targets for horizon in horizons}
+
+    for fold_name, fold_rows in work.groupby("fold", sort=False):
+        positions = fold_rows.index
+        part = fold_rows.sort_values(
+            ["origin_time", "target", "horizon"], kind="stable"
+        )
+        observed_pairs = set(zip(part["target"], part["horizon"].astype(int)))
+        if observed_pairs != expected_pairs:
+            missing_pairs = sorted(expected_pairs.difference(observed_pairs))
+            extra_pairs = sorted(observed_pairs.difference(expected_pairs))
+            raise ValueError(
+                f"折 {fold_name} 的目标×步长不完整，缺失={missing_pairs}，多余={extra_pairs}"
+            )
+        if part.duplicated(["origin_time", "target", "horizon"]).any():
+            raise ValueError(f"折 {fold_name} 存在重复的 origin/target/horizon OOF 行")
+        if part["horizon"].astype(int).mod(15).ne(0).any():
+            raise ValueError("OOF horizon 必须使用 15 分钟为单位")
+
+        current_rows = part[["origin_time", "target", "current_value"]].copy()
+        current_variants = current_rows.groupby(
+            ["origin_time", "target"], sort=False, dropna=False
+        )["current_value"].nunique(dropna=False)
+        if current_variants.gt(1).any():
+            raise ValueError(f"折 {fold_name} 同一 origin/target 的 current_value 不一致")
+        current_wide = (
+            current_rows.drop_duplicates(["origin_time", "target"])
+            .pivot(index="origin_time", columns="target", values="current_value")
+            .reindex(columns=list(targets))
+            .sort_index()
+        )
+        prediction_wide = part.pivot(
+            index="origin_time", columns=["target", "horizon"], values=base_column
+        )
+        prediction_columns = [
+            _prediction_column(target, horizon) for target in targets for horizon in horizons
+        ]
+        prediction_wide.columns = [
+            _prediction_column(str(target), int(horizon) // 15)
+            for target, horizon in prediction_wide.columns
+        ]
+        prediction_wide = prediction_wide.reindex(columns=prediction_columns).sort_index()
+        prediction_wide = prediction_wide.apply(pd.to_numeric, errors="coerce")
+        current_wide = current_wide.apply(pd.to_numeric, errors="coerce")
+        complete_mask = prediction_wide.notna().all(axis=1) & current_wide.notna().all(axis=1)
+        complete_mask &= np.isfinite(prediction_wide).all(axis=1)
+        complete_mask &= np.isfinite(current_wide).all(axis=1)
+        complete_times = prediction_wide.index[complete_mask]
+        if len(complete_times):
+            calibrated = apply_online_calibration(
+                prediction_wide.loc[complete_times],
+                current_wide.loc[complete_times],
+                targets,
+                horizons,
+                mode=mode,
+                **kwargs,
+            )
+        else:
+            calibrated = prediction_wide.iloc[0:0].copy()
+        calibrated_records: list[pd.DataFrame] = []
+        for target in targets:
+            for horizon in horizons:
+                column = _prediction_column(target, horizon)
+                record = calibrated[[column]].rename(columns={column: "value"})
+                record["origin_time"] = record.index
+                record["target"] = target
+                record["horizon"] = 15 * horizon
+                calibrated_records.append(record.reset_index(drop=True))
+        calibrated_long = pd.concat(calibrated_records, ignore_index=True).set_index(
+            ["origin_time", "target", "horizon"]
+        )["value"]
+        complete_part = part[part["origin_time"].isin(complete_times)]
+        part_keys = pd.MultiIndex.from_frame(
+            complete_part[["origin_time", "target", "horizon"]].assign(
+                horizon=complete_part["horizon"].astype(int)
+            )
+        )
+        values = calibrated_long.reindex(part_keys).to_numpy(dtype=float)
+        work.loc[complete_part.index, output_column] = values
+
+        warmup_origins = set(complete_times[:warmup_rows])
+        work.loc[positions, warmup_column] = work.loc[positions, "origin_time"].isin(
+            warmup_origins
+        )
+        fallback_origins = set(prediction_wide.index[~complete_mask])
+        work.loc[positions, fallback_column] = work.loc[positions, "origin_time"].isin(
+            fallback_origins
+        )
+
+    if work[output_column].isna().any() or not np.isfinite(work[output_column]).all():
+        raise ValueError("在线校准没有为所有 OOF 行生成有限预测")
+    work.index = rows.index
+    return work

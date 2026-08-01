@@ -147,6 +147,7 @@ def _fit_residual_model(
             sample_weight=weights[:split],
             eval_X=x.iloc[split:],
             eval_y=residual[split:],
+            eval_sample_weight=[weights[split:]],
             eval_metric="l1",
             callbacks=[
                 lgb.early_stopping(

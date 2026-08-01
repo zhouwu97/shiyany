@@ -7,13 +7,14 @@ from pathlib import Path
 import joblib
 import pandas as pd
 
-from gas_forecast.config import legacy_forecast_config
+from gas_forecast.config import ForecastConfig, horizon_ridge_forecast_config, legacy_forecast_config
 from gas_forecast.data import align_tables, combine_context
 from gas_forecast.features import (
     build_causal_features,
     load_price_schedule,
 )
 from gas_forecast.model_v1 import RidgeDeltaForecaster
+from gas_forecast.model_horizon import HorizonSpecificRidgeForecaster
 from gas_forecast.model_ensemble import GasAwareEnsembleForecaster
 from gas_forecast.model_routed import RoutedLegacyForecaster
 from gas_forecast.targets import build_delta_targets
@@ -24,6 +25,16 @@ def _find_price(data_dir: str | Path) -> Path | None:
     return matches[0] if matches else None
 
 
+def resolve_training_config(
+    version: str, config: ForecastConfig | None = None
+) -> ForecastConfig:
+    """统一训练入口配置，确保选型、重训和推理使用同一对象。"""
+
+    if config is not None:
+        return config
+    return horizon_ridge_forecast_config() if version == "horizon_ridge" else legacy_forecast_config()
+
+
 def train_model(
     data_dir: str | Path,
     output: str | Path,
@@ -31,8 +42,9 @@ def train_model(
     *,
     route: dict[str, object] | None = None,
     n_jobs: int = 4,
-) -> RidgeDeltaForecaster | GasAwareEnsembleForecaster | RoutedLegacyForecaster:
-    config = legacy_forecast_config()
+    config: ForecastConfig | None = None,
+) -> RidgeDeltaForecaster | HorizonSpecificRidgeForecaster | GasAwareEnsembleForecaster | RoutedLegacyForecaster:
+    config = resolve_training_config(version, config)
     dataset = align_tables(data_dir, config.feature.frequency)
     price_path = _find_price(data_dir)
     price = load_price_schedule(price_path) if price_path else None
@@ -46,6 +58,8 @@ def train_model(
         model = (
             RidgeDeltaForecaster(config)
             if version == "v1"
+            else HorizonSpecificRidgeForecaster(config)
+            if version == "horizon_ridge"
             else GasAwareEnsembleForecaster(version, config)
         )
     model.fit(
@@ -68,7 +82,7 @@ def predict_rolling(
     test_dir: str | Path,
     model_path: str | Path,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    model: RidgeDeltaForecaster | GasAwareEnsembleForecaster | RoutedLegacyForecaster = joblib.load(
+    model: RidgeDeltaForecaster | HorizonSpecificRidgeForecaster | GasAwareEnsembleForecaster | RoutedLegacyForecaster = joblib.load(
         model_path
     )
     train = align_tables(train_dir, model.config.feature.frequency).frame

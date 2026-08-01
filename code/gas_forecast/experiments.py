@@ -54,7 +54,14 @@ RESULTS_ROOT = Path("results")
 def _run_partition(prefix: str) -> tuple[tuple[str, ...], str]:
     """根据任务前缀决定历史归档分区和 latest 文件名。"""
 
-    if prefix in {"legacy_oof", "backtest_v1", "backtest_v2", "backtest_v25", "backtest_v3"}:
+    if prefix in {
+        "legacy_oof",
+        "online_oof",
+        "backtest_v1",
+        "backtest_v2",
+        "backtest_v25",
+        "backtest_v3",
+    }:
         return ("raw", "runs", "oof"), "oof"
     if prefix.startswith("compare_") or prefix in {"select_model", "select_candidate"}:
         return ("raw", "runs", "comparisons"), "comparison"

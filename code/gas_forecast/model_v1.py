@@ -137,5 +137,9 @@ class RidgeDeltaForecaster:
             output[generator_1] = output[generator_1].clip(lower=0.0, upper=200.0)
             output[generator_all] = output[generator_all].clip(lower=0.0, upper=440.0)
             output[generator_all] = np.maximum(output[generator_all], output[generator_1])
+            # 其余两套机组总容量为 240MW，修正 generator_rest 的物理上界。
+            output[generator_all] = np.minimum(
+                output[generator_all], output[generator_1] + 240.0
+            )
         if not np.isfinite(output.to_numpy()).all():
             raise ValueError("预测结果包含非有限值")

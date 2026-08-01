@@ -11,6 +11,7 @@ from joblib import Parallel, delayed
 from gas_forecast.config import ForecastConfig
 from gas_forecast.model_ensemble import GasAwareEnsembleForecaster
 from gas_forecast.model_v1 import RidgeDeltaForecaster
+from gas_forecast.model_horizon import HorizonSpecificRidgeForecaster
 from gas_forecast.scoring import competition_mape
 from gas_forecast.targets import build_delta_targets
 
@@ -82,6 +83,8 @@ def backtest_model(
         model = (
             RidgeDeltaForecaster(config)
             if version == "v1"
+            else HorizonSpecificRidgeForecaster(config)
+            if version == "horizon_ridge"
             else GasAwareEnsembleForecaster(version, config)
         ).fit(
             features.loc[train_mask],

@@ -78,6 +78,25 @@ python scripts/run_experiment.py --data-dir "data/raw/official/初赛-参赛者�
 python scripts/audit_leakage.py --data-dir "data/raw/official/初赛-参赛者使用" --model <model> --jobs 8
 ```
 
+在线校准只使用已经成熟的历史预测误差，按外层折独立冷启动。可以在生成 OOF 时直接比较，也可以复用已有 OOF 长表：
+
+```powershell
+python scripts/build_oof.py `
+  --data-dir "data/raw/official/初赛-参赛者使用" `
+  --versions v1 `
+  --online-base v1 `
+  --online-modes bias gain vintage `
+  --online-warmup-rows 0
+
+python scripts/apply_online_oof.py `
+  --input <run-dir>/oof.csv `
+  --base-column v1_pred `
+  --modes bias gain vintage `
+  --warmup-rows 0
+```
+
+`--warmup-rows 0` 是冷启动；设置为正数时，每个外层折的前若干个 origin 只用于热启动、不计入在线候选评分。数据末端若缺少完整目标×步长组合，候选会保留基础预测并在报告中登记 fallback 行数。
+
 所有命令默认写入 `results/raw/runs/{oof,comparisons,training,experiments,audits}/<运行时间>/` 分类目录。每个运行目录包含报告、manifest、日志和 checkpoint；指定同一 `--run-dir` 可从已完成折继续。最近一次各类运行的指针在 `results/latest/`。
 
 正式提交只执行：

@@ -95,6 +95,31 @@ def _add_zero_features(
     )
 
 
+def _add_target_aligned_features(
+    output: dict[str, pd.Series | np.ndarray],
+    series: pd.Series,
+    target: str,
+    config: FeatureConfig,
+) -> None:
+    """为每个预测步长登记历史上对应目标时刻的周期锚点。"""
+
+    for horizon in config.horizons:
+        aligned: list[pd.Series] = []
+        for days in config.target_aligned_cycle_days:
+            lag = 96 * days - horizon
+            if lag <= 0:
+                continue
+            value = series.shift(lag)
+            aligned.append(value)
+            output[f"feat_{target}_aligned_h{horizon}_lag_{lag}"] = value
+        if not aligned:
+            continue
+        matrix = pd.concat(aligned, axis=1)
+        output[f"feat_{target}_aligned_h{horizon}_mean"] = matrix.mean(axis=1)
+        output[f"feat_{target}_aligned_h{horizon}_median"] = matrix.median(axis=1)
+        output[f"feat_{target}_aligned_h{horizon}_vs_current"] = series - matrix.iloc[:, 0]
+
+
 def build_causal_features(
     frame: pd.DataFrame,
     config: FeatureConfig | None = None,
@@ -293,6 +318,11 @@ def build_causal_features(
                 baseline = same_slots.iloc[:, :days].mean(axis=1)
                 feature_values[f"feat_{name}_same_slot_mean_{days}d"] = baseline
                 feature_values[f"feat_{name}_vs_same_slot_mean_{days}d"] = series - baseline
+
+    if config.enable_target_aligned_features:
+        for target in ("generator_1", "generator_all"):
+            if target in filled:
+                _add_target_aligned_features(feature_values, filled[target], target, config)
 
     zero_candidates = generator_gas_columns + [
         "air_heater_5",
