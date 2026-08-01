@@ -491,7 +491,7 @@ def build_causal_features(
             prices.append(price)
             feature_values[f"feat_target_price_tplus_{15 * horizon}"] = price
         price_matrix = np.column_stack(prices)
-        changed = price_matrix != price_matrix[:, [0]]
+        changed = price_matrix != current_price[:, None]
         first_change = np.where(changed.any(axis=1), changed.argmax(axis=1) + 1, 0)
         feature_values["feat_price_switch_within_120"] = changed.any(axis=1).astype("int8")
         feature_values["feat_steps_to_price_switch"] = first_change.astype("int8")
