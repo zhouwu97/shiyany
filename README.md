@@ -78,6 +78,25 @@ python scripts/run_experiment.py --data-dir "data/raw/official/初赛-参赛者�
 python scripts/audit_leakage.py --data-dir "data/raw/official/初赛-参赛者使用" --model <model> --jobs 8
 ```
 
+在线校准只使用已经成熟的历史预测误差，按外层折独立冷启动。可以在生成 OOF 时直接比较，也可以复用已有 OOF 长表：
+
+```powershell
+python scripts/build_oof.py `
+  --data-dir "data/raw/official/初赛-参赛者使用" `
+  --versions v1 `
+  --online-base v1 `
+  --online-modes bias gain vintage `
+  --online-warmup-rows 0
+
+python scripts/apply_online_oof.py `
+  --input <run-dir>/oof.csv `
+  --base-column v1_pred `
+  --modes bias gain vintage `
+  --warmup-rows 0
+```
+
+`--warmup-rows 0` 是 cold-start OOF；设置为正数时，是 within-fold warm-up OOF：每个外层折的前若干个 origin 只用于填充状态、不计入在线候选评分，不代表跨折外部热启动。数据末端若缺少完整目标×步长组合，候选会保留基础预测并在报告中登记 fallback 行数。
+
 所有命令默认写入 `results/raw/runs/{oof,comparisons,training,experiments,audits}/<运行时间>/` 分类目录。每个运行目录包含报告、manifest、日志和 checkpoint；指定同一 `--run-dir` 可从已完成折继续。最近一次各类运行的指针在 `results/latest/`。
 
 正式提交只执行：
@@ -133,3 +152,5 @@ python scripts/export_json.py --input submissions/final/s_result.csv --output su
 测试期每一行只能在该行对应的滚动起点作为当前输入使用，后续行不能进入当前预测。不得根据测试集未来真实值反推模型、阈值、融合权重或版本。若需要本地查看测试得分，必须先冻结预测文件，再运行独立的 `scripts/evaluate_frozen.py`；该结果只用于最终评估，不得反馈到训练过程。
 
 完整阶段、验收标准和分段提交设计见 [实施计划](docs/IMPLEMENTATION_PLAN.md)。实验结论与路线裁决分别记录在 [RESULTS_REPORT.md](RESULTS_REPORT.md) 和 [DECISIONS.md](DECISIONS.md)。
+
+PR #1 之后的 `generator_1` 专项 Ridge、时间漂移、价格、加权损失、受限树模型、真正 OOF hot start、状态专家和路径候选，统一通过[研究工作流](docs/RESEARCH_WORKFLOW.md)运行；该入口默认不触碰 blind，也不会自动覆盖 `results/best/`。

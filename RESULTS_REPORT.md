@@ -175,3 +175,83 @@ CatBoost 虽优于新 cross-fitting 候选，但未超过冻结的 M1；煤气�
 ## 并行与复现记录
 
 实验脚本新增 `tree_threads_per_worker`：默认按逻辑核心数和实际外层 worker 数自动分配，避免外层 8 折同时运行时每个 CatBoost/LightGBM 进程都占满全部线程。一折 smoke 使用 16 线程；多折运行自动降到每折 2 线程。每次运行仍写入独立时间戳目录和逐折 checkpoint，可从中断位置恢复。
+
+## 2026-08-01 P1/P2 目标对齐 Ridge 与在线校准完整 OOF
+
+本轮使用同一组 20 个外层折、62,858 个目标×步长单元和 120 分钟 purge。V1 基线来自 `results/raw/runs/oof/2026-07-31_23-17-51/report.json`；目标对齐 Ridge 来自 `results/raw/runs/oof/20260801_145625_722/report.json`；在线校准 cold-start 和 within-fold warm-up 分别来自 `results/raw/runs/oof/20260801_online_full/report.json` 与 `results/raw/runs/oof/20260801_online_full_hot/report.json`。
+
+### Cold-start OOF
+
+| 候选 | pooled MAPE | `generator_1` | `generator_all` | blind 折 | 胜 V1 折数 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| V1 基线 | 5.4073% | 6.1518% | 4.6629% | 5.9047% | — |
+| Horizon-specific Ridge | 5.4475% | 6.1664% | 4.7287% | **5.9004%** | 4/20 |
+| EMA bias | 5.6204% | 6.5065% | 4.7342% | 6.3088% | 5/20 |
+| EMA correction gain | **5.3543%** | 6.1992% | **4.5095%** | 5.9484% | 6/20 |
+| Forecast vintage | 5.5934% | 6.2561% | 4.9306% | 6.0870% | 1/20 |
+
+`gain` 的 pooled MAPE 比 V1 低 0.0530 个百分点，但 blind 折退化 0.0437 个百分点；Horizon-specific Ridge 仅在 blind 折微降，完整 pooled 和 `generator_1` 均退化。因此二者都不替换正式 M1 路由。
+
+### Within-fold warm-up OOF
+
+每个外层折前 96 个 origin 仅用于填充状态，不计入评分；这不是使用外部历史 OOF 的生产等价外部热启动。相同评分子集上的 V1 基线为 pooled 5.1769%、blind 6.2366%。
+
+| 候选 | pooled MAPE | `generator_1` | `generator_all` | blind 折 | 胜同子集 V1 折数 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| EMA bias | 5.3752% | 6.0674% | 4.6830% | 6.6087% | 4/20 |
+| EMA correction gain | **5.0921%** | **5.7633%** | **4.4208%** | 6.3061% | 12/20 |
+| Forecast vintage | 5.3724% | 5.8337% | 4.9111% | 6.4595% | 0/20 |
+
+within-fold warm-up 结果同样未通过 blind 折不退化门槛，所有在线候选均保留为可复用实验框架，不进入正式推理和提交模型。
+
+### 固定参数与可复现口径
+
+- Horizon-specific Ridge：目标 `generator_1/generator_all`，步长 `1..8`，`ridge_alpha=20`，校准区比例 `0.15`，增量分位裁剪 `0.001/0.999`；启用目标时刻对齐周期特征，周期日为 `1/2/3/7`。
+- 在线校准：`half_life=16`，`bias_clip=12`，`gain_clip=[0, 1.3]`，`vintage_weight=0.25`；每个 outer fold 独立 cold start。
+- 评价名称固定为 `cold_start` 与 `within_fold_warmup`；不将 within-fold warm-up 称为外部热启动。
+
+### 冻结提交与路由约束审计
+
+- 收尾时执行 `scripts/prepare_submission.py --no-open`，提交校验通过；`results/best/submission.zip` 与 `提交这个/teamname_gas_predict_prelim.zip` 均只有 `result.csv`，SHA256 都为 `0ca59bb6e66004ae95efa64000ecbf81a86bcc988f0559cae33dc0b7e0d7fb27`。
+- 两份 `result.csv` 的字节内容和逐元素内容均一致，SHA256 都为 `a1124f9fe1991c06d4b4d81e841e6296e86c206a424ba78fdb1a48a2dd656e77`，形状为 `192×17`；因此本 PR 不会改变当前待提交 ZIP。
+- 对既有 `results/raw/runs/comparisons/2026-07-31_23-51-56/routed.csv` 做与 `RoutedLegacyForecaster.predict()` 相同的确定性后处理审计：无新增上下界裁剪单元；`generator_all > generator_1 + 240` 的 796 个 OOF 单元被收缩，`generator_all < generator_1` 为 0 个，其中 blind 为 48 个。总 MAPE 从 5.3062% 降到 5.3020%，`generator_all` 从 4.4812% 降到 4.4728%，blind 从 5.8039% 降到 5.7997%。该项是对已有 OOF 的后处理影响量化，不重训、不替换冻结提交。
+
+## 2026-08-01 Phase 1 30 天指数时间衰减验收
+
+本轮先在固定 5 折快筛拒绝了目标时刻对齐扩展（E11/E12），并发现长步长 `alpha=5` 的收益仅 0.002 个百分点，未冻结。随后只在 E10 核心 `generator_1` Horizon Ridge 上比较时间漂移。E21 的完整 development OOF 与 final blind 验收均使用冻结的 `generator_all -> V3` 路由、120 分钟 purge 和同一批外层折。
+
+| final 候选 | pooled MAPE | `generator_1` | `generator_all` | 优于基线折数 |
+| --- | ---: | ---: | ---: | ---: |
+| E10 核心基线 | 5.3160% | 6.1603% | 4.4717% | — |
+| **E21，指数半衰期 30d** | **5.3017%** | **6.1319%** | **4.4715%** | **14/20** |
+
+- pooled 改善 0.0143 个百分点，`generator_1` 改善 0.0283 个百分点；最大单折退化为 0.0362 个百分点，低于 0.1 个百分点正式门槛。
+- 独立 blind 折从 5.7504% 降至 5.7243%，改善 0.0262 个百分点；`generator_1` 从 6.08% 降至 6.03%。因此没有出现 blind 反转。
+- 完整开发 OOF、最终验收报告和逐折预测分别登记在 `results/raw/runs/experiments/e21_recency_development_20260801_1641/` 与 `results/raw/runs/experiments/e21_recency_final_20260801_1657/`。
+- 已按 final 报告全量训练 `generator1_horizon`，模型为 `results/raw/runs/training/e21_recency_30d_full_20260801_1714/model.joblib`；泄漏审计覆盖 50 个 origin、5 类未来扰动、250 个案例，全部通过，报告位于 `results/raw/runs/audit/e21_recency_30d_20260801_1717/report.json`。
+- 该训练产物尚未覆盖 `results/best/` 或现有提交 ZIP；是否晋级为正式提交由后续明确发布动作决定。
+
+## 2026-08-01 E21 对正式 routed champion 的同口径晋级复核（拒绝）
+
+E10→E21 的 14/20 胜折结论仅证明 30 天指数衰减优于 E10 核心 Ridge，不等价于优于当前正式模型。为作最终晋级判定，使用 `results/best/selection.json` 中冻结的 `generator_1 -> V2`、`generator_all -> V3` 路由，在当前代码与容量约束下重新运行 20 个外层折、62,858 个目标×步长单元；E21 只从其最终验收报告恢复冻结的 30 天半衰期配置。完整可追溯产物位于 `results/raw/runs/experiments/20260801_175745_257/`。
+
+| 同口径模型 | pooled MAPE | `generator_1` | `generator_all` | 相对 formal champion |
+| --- | ---: | ---: | ---: | ---: |
+| 当前 formal routed champion | 5.301877% | **6.131131%** | 4.472623% | — |
+| E21，指数半衰期 30d | **5.301845%** | 6.131938% | **4.471752%** | pooled -0.000032pp |
+
+| 步长 | formal champion | E21 | E21 − champion |
+| --- | ---: | ---: | ---: |
+| t+15 | **2.285030%** | 2.304443% | +0.019413pp |
+| t+30 | **3.353161%** | 3.383004% | +0.029842pp |
+| t+45 | **4.225739%** | 4.243979% | +0.018240pp |
+| t+60 | **5.116907%** | 5.128239% | +0.011332pp |
+| t+75 | 5.898396% | **5.895906%** | -0.002490pp |
+| t+90 | 6.608002% | **6.586113%** | -0.021889pp |
+| t+105 | 7.213513% | **7.187835%** | -0.025678pp |
+| t+120 | 7.723348% | **7.694219%** | -0.029128pp |
+
+- E21 仅赢 8/20 折；最近 5 个开发折仅 `dev_16` 获胜（1/5），其余差异分别为 +0.096792、-0.026963、+0.084512、+0.020258、+0.009475 个百分点。
+- blind 折确实从 5.799374% 降至 5.724263%（-0.075110pp），但不能覆盖开发折中的不稳定性和 `generator_1` 的 +0.000807pp 退化。
+- 日块 bootstrap（41 日块、2,000 次）中 E21 优于 champion 的概率仅为 48.45%，95% CI 为 [-0.033913pp, +0.031830pp]；仅开发折的概率更低，为 34.68%（38 日块）。
+- 因此 `formal_candidate=false`：尽管 pooled 有极小数值改善且 blind 不反转，E21 未达到多数折获胜、`generator_1` 不退化与 bootstrap 支持三道门槛。`results/best/`、现有 192×16 `result.csv` 与提交 ZIP 均保持不变；没有执行 promotion、预测手工编辑或任何测试标签/榜单反馈操作。

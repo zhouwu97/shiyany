@@ -95,6 +95,14 @@ class RoutedLegacyForecaster:
         for target, upper in (("generator_1", 200.0), ("generator_all", 440.0)):
             columns = [column for column in result if column.startswith(f"{target}_")]
             result[columns] = result[columns].clip(lower=0.0, upper=upper)
+        for horizon in self.config.feature.horizons:
+            minutes = 15 * horizon
+            generator_1 = f"generator_1_t+{minutes}_pred"
+            generator_all = f"generator_all_t+{minutes}_pred"
+            result[generator_all] = np.maximum(result[generator_all], result[generator_1])
+            result[generator_all] = np.minimum(
+                result[generator_all], result[generator_1] + 240.0
+            )
         if not np.isfinite(result.to_numpy()).all():
             raise ValueError("路由预测包含非有限值")
         return result

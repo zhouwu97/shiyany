@@ -61,3 +61,18 @@
 - 历史运行按 `oof`、`comparisons`、`training`、`experiments`、`audits` 分区归档；`results/latest/` 只保存各类型最近一次运行指针。
 - 正式最优模型固定在 `results/best/`，只有完整运行、非 smoke、泄漏通过、测试通过、提交校验通过且 pooled MAPE 更低的候选才允许晋级。
 - 用户唯一提交入口为 `提交这个/teamname_gas_predict_prelim.zip`；`scripts/show_best.py` 查询当前 best，`scripts/prepare_submission.py` 负责校验和复制，不允许从历史 run 目录手工挑选 ZIP。
+
+## 2026-08-01 P1/P2 目标对齐与在线校准收尾
+
+- Horizon-specific Ridge 完整 20 折 pooled MAPE 为 5.4475%，blind 为 5.9004%；虽然 blind 略优于 V1 的 5.9047%，但 pooled、`generator_1` 和胜折数均不足以替换正式 M1。
+- Cold-start 在线 correction gain pooled MAPE 为 5.3543%，但 blind 从 V1 的 5.9047% 退化到 5.9484%；bias 和 vintage 也在 blind 退化，全部拒绝晋级。
+- 每折前 96 个 origin 的 within-fold warm-up gain 在同评分子集上从 5.1769% 降到 5.0921%，但 blind 从 6.2366% 退化到 6.3061%；该结果不能称为外部热启动，也不进入正式推理。
+- 在线代码保留为严格因果、可复用的 OOF 校准框架；正式模型仍只使用冻结的持久化 M1 路由。
+- 收尾审计确认正式提交未变：best ZIP 与用户提交 ZIP SHA256 均为 `0ca59bb6e66004ae95efa64000ecbf81a86bcc988f0559cae33dc0b7e0d7fb27`，`result.csv` 逐字节一致。现有 routed OOF 上的新增 `generator_all <= generator_1 + 240` 约束影响 796/62,858 个单元，MAPE 从 5.3062% 降至 5.3020%，不改变冻结提交。
+
+## 2026-08-01 E21 正式晋级判定
+
+- E21 的 30 天指数衰减相对 E10 核心 Ridge 是成功的低复杂度研究结论：pooled 改善 0.0143pp、`generator_1` 改善 0.0283pp，且对 E10 赢 14/20 折。
+- 正式晋级必须比较当前 champion，而非 E10。使用 `results/best/selection.json` 的冻结 V2/V3 路由、当前容量约束、相同 20 折和 62,858 个单元重新训练后，formal champion 为 5.301877%，E21 为 5.301845%，表面 pooled 优势仅 0.000032pp。
+- E21 的 `generator_1` 从 6.131131% 退化到 6.131938%，只赢 8/20 折，最近 5 个开发折仅赢 1 折；尽管 blind 改善 0.075110pp，日块 bootstrap 的全样本支持概率仅 48.45%，开发折为 34.68%。
+- 决定：`formal_candidate=false`，拒绝将 E21 覆盖到 `results/best/`。保留已训练模型、OOF、泄漏审计和研究代码作为后续时间编码、价格交互、weighted Ridge 的受控起点；正式提交继续使用 M1 V2/V3 routed champion。

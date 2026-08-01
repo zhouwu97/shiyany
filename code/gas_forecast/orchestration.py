@@ -188,7 +188,7 @@ def run_automated_pipeline(
     _write_json(selection_path, decision)
 
     selected_version = str(decision["selected_version"])
-    train_model(train_dir, model_path, selected_version)
+    train_model(train_dir, model_path, selected_version, config=config)
     input_features, predictions = predict_rolling(train_dir, test_dir, model_path)
     output_dir.mkdir(parents=True, exist_ok=True)
     input_path = output_dir / "input.csv"
@@ -321,10 +321,10 @@ def run_competition_pipeline(
     model_path = run_path / "model.joblib"
     if selected == "stable_target_horizon_lofo":
         route = route_report["final_route"]
-        train_model(train_dir, model_path, "routed", route=route, n_jobs=jobs)
+        train_model(train_dir, model_path, "routed", route=route, n_jobs=jobs, config=config)
         trained_version = "routed"
     elif selected == "v2_v3_target":
-        train_model(train_dir, model_path, "routed", route=_target_route(), n_jobs=jobs)
+        train_model(train_dir, model_path, "routed", route=_target_route(), n_jobs=jobs, config=config)
         trained_version = "routed"
     elif selected == "persistence":
         train_model(
@@ -333,10 +333,11 @@ def run_competition_pipeline(
             "routed",
             route=_single_model_route("persistence"),
             n_jobs=jobs,
+            config=config,
         )
         trained_version = "routed"
     else:
-        train_model(train_dir, model_path, selected)
+        train_model(train_dir, model_path, selected, config=config)
         trained_version = selected
 
     input_features, predictions = predict_rolling(train_dir, test_dir, model_path)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from typing import Mapping
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,15 @@ class FeatureConfig:
     enable_anomaly_features: bool = True
     enable_physical_features: bool = True
     enable_long_cycle_features: bool = True
+    enable_target_aligned_features: bool = False
+    target_aligned_cycle_days: tuple[int, ...] = (1, 2, 3, 7)
+    enable_slot_one_hot: bool = False
+    enable_time_fourier: bool = False
+    enable_price_delta_features: bool = False
+    enable_price_interactions: bool = False
+    dynamic_feature_scope: str = "none"
+    dynamic_lags: tuple[int, ...] = (1, 2, 4, 8)
+    dynamic_rolling_windows: tuple[int, ...] = (4, 8)
 
 
 @dataclass(frozen=True)
@@ -54,6 +64,26 @@ class ModelConfig:
     gate_max: float = 0.70
     generator_1_max_shrink: float = 0.60
     generator_all_max_shrink: float = 0.40
+    generator1_feature_profile: str = "all"
+    generator_all_route_model: str = "v3"
+    generator1_short_alpha: float | None = None
+    generator1_long_alpha: float | None = None
+    ridge_recency_mode: str = "all"
+    ridge_hard_window_days: int | None = None
+    ridge_half_life_days: float | None = None
+    ridge_magnitude_weighting: str = "uniform"
+    ridge_loss: str = "ridge"
+    weighted_lad_alpha: float = 0.05
+    state_transition_threshold: float = 3.0
+    state_expert_inner_folds: int = 5
+    path_smoothing_lambda: float = 0.0
+    incremental_blend_weight: float = 0.25
+    online_calibration_rows: int = 192
+    online_refit_stride: int = 8
+    online_half_life: float = 16.0
+    online_bias_clip: float = 12.0
+    online_vintage_weight: float = 0.25
+    apply_capacity_projection: bool = True
 
 
 @dataclass(frozen=True)
@@ -90,4 +120,68 @@ def legacy_forecast_config() -> ForecastConfig:
             enable_physical_features=False,
             enable_long_cycle_features=False,
         ),
+    )
+
+
+def horizon_ridge_forecast_config() -> ForecastConfig:
+    """返回目标时刻对齐 Ridge 使用的低自由度配置。"""
+
+    config = legacy_forecast_config()
+    return replace(
+        config,
+        feature=replace(
+            config.feature,
+            enable_target_aligned_features=True,
+            enable_long_cycle_features=True,
+        ),
+    )
+
+
+def research_forecast_config() -> ForecastConfig:
+    """返回 Phase 1–14 目标路由候选的默认冻结前配置。"""
+
+    config = ForecastConfig()
+    return replace(
+        config,
+        feature=replace(
+            config.feature,
+            enable_target_aligned_features=True,
+            enable_long_cycle_features=True,
+        ),
+        model=replace(config.model, generator1_feature_profile="core"),
+    )
+
+
+def research_feature_superset(feature: FeatureConfig) -> FeatureConfig:
+    """返回同时覆盖既有 V3 与 generator_1 研究模块的因果特征超集。"""
+
+    return replace(
+        feature,
+        enable_long_cycle_features=True,
+    )
+
+
+def forecast_config_from_dict(payload: Mapping[str, object]) -> ForecastConfig:
+    """从实验报告中的 ``asdict(ForecastConfig)`` 恢复不可变运行配置。"""
+
+    feature_payload = dict(payload.get("feature", {}))
+    for key in (
+        "horizons",
+        "lags",
+        "diff_lags",
+        "rolling_windows",
+        "target_aligned_cycle_days",
+        "dynamic_lags",
+        "dynamic_rolling_windows",
+    ):
+        if key in feature_payload:
+            feature_payload[key] = tuple(feature_payload[key])
+    model_payload = dict(payload.get("model", {}))
+    validation_payload = dict(payload.get("validation", {}))
+    targets = tuple(payload.get("targets", ForecastConfig().targets))
+    return ForecastConfig(
+        targets=targets,
+        feature=FeatureConfig(**feature_payload),
+        model=ModelConfig(**model_payload),
+        validation=ValidationConfig(**validation_payload),
     )

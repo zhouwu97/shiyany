@@ -71,3 +71,37 @@ def test_only_known_price_features_may_have_positive_information_offset() -> Non
     metadata = audit_feature_availability(columns)
     assert metadata["feat_generator_1_lag_4"].max_offset_minutes == -60
     assert metadata["feat_target_price_tplus_120"].known_in_advance is True
+
+
+def test_target_aligned_cycle_feature_uses_same_future_slot_from_previous_day() -> None:
+    rows = 220
+    index = pd.date_range("2025-01-01", periods=rows, freq="15min")
+    values = np.arange(rows, dtype=float)
+    frame = pd.DataFrame(
+        {"generator_1": values, "generator_all": values + 100.0}, index=index
+    )
+    config = FeatureConfig(
+        horizons=(1,),
+        lags=(1,),
+        diff_lags=(1,),
+        rolling_windows=(4,),
+        enable_anomaly_features=False,
+        enable_physical_features=False,
+        enable_long_cycle_features=False,
+        enable_target_aligned_features=True,
+    )
+    features = build_causal_features(frame, config)
+
+    # t+15 的昨日同目标时刻是 t-95 个采样点。
+    assert features.loc[index[150], "feat_generator_1_aligned_h1_lag_95"] == pytest.approx(55.0)
+
+
+def test_target_aligned_features_remain_causal_under_future_perturbation() -> None:
+    frame = _frame(220)
+    config = FeatureConfig(enable_target_aligned_features=True)
+    origin = frame.index[150]
+    baseline = build_causal_features(frame, config)
+    changed = frame.copy()
+    changed.loc[changed.index > origin] = -999_999.0
+    perturbed = build_causal_features(changed, config)
+    pd.testing.assert_series_equal(baseline.loc[origin], perturbed.loc[origin])
