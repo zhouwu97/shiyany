@@ -61,3 +61,11 @@
 - 历史运行按 `oof`、`comparisons`、`training`、`experiments`、`audits` 分区归档；`results/latest/` 只保存各类型最近一次运行指针。
 - 正式最优模型固定在 `results/best/`，只有完整运行、非 smoke、泄漏通过、测试通过、提交校验通过且 pooled MAPE 更低的候选才允许晋级。
 - 用户唯一提交入口为 `提交这个/teamname_gas_predict_prelim.zip`；`scripts/show_best.py` 查询当前 best，`scripts/prepare_submission.py` 负责校验和复制，不允许从历史 run 目录手工挑选 ZIP。
+
+## 2026-08-01 P1/P2 目标对齐与在线校准收尾
+
+- Horizon-specific Ridge 完整 20 折 pooled MAPE 为 5.4475%，blind 为 5.9004%；虽然 blind 略优于 V1 的 5.9047%，但 pooled、`generator_1` 和胜折数均不足以替换正式 M1。
+- Cold-start 在线 correction gain pooled MAPE 为 5.3543%，但 blind 从 V1 的 5.9047% 退化到 5.9484%；bias 和 vintage 也在 blind 退化，全部拒绝晋级。
+- 每折前 96 个 origin 的 within-fold warm-up gain 在同评分子集上从 5.1769% 降到 5.0921%，但 blind 从 6.2366% 退化到 6.3061%；该结果不能称为外部热启动，也不进入正式推理。
+- 在线代码保留为严格因果、可复用的 OOF 校准框架；正式模型仍只使用冻结的持久化 M1 路由。
+- 收尾审计确认正式提交未变：best ZIP 与用户提交 ZIP SHA256 均为 `0ca59bb6e66004ae95efa64000ecbf81a86bcc988f0559cae33dc0b7e0d7fb27`，`result.csv` 逐字节一致。现有 routed OOF 上的新增 `generator_all <= generator_1 + 240` 约束影响 796/62,858 个单元，MAPE 从 5.3062% 降至 5.3020%，不改变冻结提交。

@@ -14,7 +14,9 @@ from gas_forecast.scoring import score_oof_long
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="对已有 OOF 长表执行冷启动/热启动在线校准")
+    parser = argparse.ArgumentParser(
+        description="对已有 OOF 长表执行冷启动/折内 warm-up 在线校准"
+    )
     parser.add_argument("--input", type=Path, required=True, help="已有 OOF CSV")
     parser.add_argument("--base-column", required=True, help="基础预测列，例如 v1_pred")
     parser.add_argument(
@@ -81,6 +83,9 @@ def main() -> None:
             "scored_rows": int(len(scored)),
             "fallback_rows": int(rows[fallback_column].sum()),
             "baseline_on_same_scored_rows": score_oof_long(scored, args.base_column),
+            "evaluation_mode": (
+                "cold_start" if args.warmup_rows == 0 else "within_fold_warmup"
+            ),
         }
     output.parent.mkdir(parents=True, exist_ok=True)
     rows.to_csv(output, index=False, encoding="utf-8")
@@ -93,7 +98,9 @@ def main() -> None:
             "targets": list(targets),
             "horizons": list(horizons),
             "warmup_rows_per_fold": args.warmup_rows,
-            "cold_start": args.warmup_rows == 0,
+            "evaluation_mode": (
+                "cold_start" if args.warmup_rows == 0 else "within_fold_warmup"
+            ),
             "models": reports,
         },
     )
@@ -109,6 +116,9 @@ def main() -> None:
                 "report": str(report_path.relative_to(run_dir) if report_path.is_relative_to(run_dir) else report_path),
                 "base_column": args.base_column,
                 "warmup_rows_per_fold": args.warmup_rows,
+                "evaluation_mode": (
+                    "cold_start" if args.warmup_rows == 0 else "within_fold_warmup"
+                ),
                 "models": {
                     name: report["pooled_mape"] for name, report in reports.items()
                 },

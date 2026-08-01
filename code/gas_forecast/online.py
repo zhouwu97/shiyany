@@ -65,32 +65,45 @@ class OnlineForecastCalibrator:
         return "short" if self.horizons.index(horizon) < len(self.horizons) // 2 else "long"
 
     def observe(self, timestamp: pd.Timestamp, actual: pd.Series) -> None:
-        """只结算当前时刻已经揭晓的历史预测。"""
+        """结算截至当前时刻已经揭晓且真实值可用的历史预测。"""
 
         timestamp = pd.Timestamp(timestamp)
-        matured = self.pending.pop(timestamp, [])
-        for item in matured:
-            value = float(actual[item.target])
-            key = (item.target, item.horizon)
-            if self.mode == "bias":
-                error = value - item.published_prediction
-                self.bias[key] = float(
-                    np.clip(
-                        self.decay * self.bias[key] + (1.0 - self.decay) * error,
-                        -self.bias_clip,
-                        self.bias_clip,
+        due_times = sorted(due for due in self.pending if due <= timestamp)
+        for due_time in due_times:
+            matured = self.pending.pop(due_time, [])
+            still_pending: list[MaturedForecast] = []
+            for item in matured:
+                try:
+                    value = float(actual.get(item.target, np.nan))
+                except (TypeError, ValueError):
+                    value = float("nan")
+                if not np.isfinite(value):
+                    still_pending.append(item)
+                    continue
+                key = (item.target, item.horizon)
+                if self.mode == "bias":
+                    error = value - item.published_prediction
+                    self.bias[key] = float(
+                        np.clip(
+                            self.decay * self.bias[key] + (1.0 - self.decay) * error,
+                            -self.bias_clip,
+                            self.bias_clip,
+                        )
                     )
-                )
-            elif self.mode == "gain":
-                delta = item.base_prediction - item.anchor
-                group = (item.target, self._gain_group(item.horizon))
-                weight = 1.0 / max(abs(value), 1.0)
-                self.gain_numerator[group] = (
-                    self.decay * self.gain_numerator[group] + (1.0 - self.decay) * weight * delta * (value - item.anchor)
-                )
-                self.gain_denominator[group] = (
-                    self.decay * self.gain_denominator[group] + (1.0 - self.decay) * weight * delta * delta
-                )
+                elif self.mode == "gain":
+                    delta = item.base_prediction - item.anchor
+                    group = (item.target, self._gain_group(item.horizon))
+                    weight = 1.0 / max(abs(value), 1.0)
+                    self.gain_numerator[group] = (
+                        self.decay * self.gain_numerator[group]
+                        + (1.0 - self.decay) * weight * delta * (value - item.anchor)
+                    )
+                    self.gain_denominator[group] = (
+                        self.decay * self.gain_denominator[group]
+                        + (1.0 - self.decay) * weight * delta * delta
+                    )
+            if still_pending:
+                self.pending[due_time].extend(still_pending)
 
     def transform(
         self,
@@ -150,6 +163,8 @@ class OnlineForecastCalibrator:
         base_predictions: pd.DataFrame,
         current: pd.DataFrame,
         targets: tuple[str, ...],
+        *,
+        allow_missing: bool = False,
     ) -> pd.DataFrame:
         """逐行生成校准结果，当前行真实值只在该行开始时可用。"""
 
@@ -159,14 +174,22 @@ class OnlineForecastCalibrator:
         for timestamp in base_predictions.index:
             self.observe(timestamp, current.loc[timestamp])
             for target in targets:
+                if target not in current.columns:
+                    continue
                 anchor = float(current.loc[timestamp, target])
+                if not np.isfinite(anchor):
+                    continue
                 for horizon in self.horizons:
                     column = _prediction_column(target, horizon)
+                    if column not in base_predictions.columns:
+                        continue
                     base = float(base_predictions.loc[timestamp, column])
+                    if not np.isfinite(base):
+                        continue
                     published = self.transform(timestamp, target, horizon, anchor, base)
                     output.loc[timestamp, column] = published
                     self.register(timestamp, target, horizon, anchor, base, published)
-        if not np.isfinite(output.to_numpy()).all():
+        if not allow_missing and not np.isfinite(output.to_numpy(dtype=float)).all():
             raise ValueError("在线校准结果包含非有限值")
         return output
 
@@ -178,12 +201,15 @@ def apply_online_calibration(
     horizons: tuple[int, ...],
     *,
     mode: str = "bias",
+    allow_missing: bool = False,
     **kwargs: object,
 ) -> pd.DataFrame:
     """便捷的冷启动 walk-forward 入口。"""
 
     calibrator = OnlineForecastCalibrator(horizons, mode=mode, **kwargs)
-    return calibrator.walk_forward(base_predictions, current, targets)
+    return calibrator.walk_forward(
+        base_predictions, current, targets, allow_missing=allow_missing
+    )
 
 
 def apply_online_calibration_to_oof(
@@ -201,8 +227,8 @@ def apply_online_calibration_to_oof(
 
     每个外层折都从空状态开始，按 ``origin_time`` 逐行推进。状态只读取
     ``current_value``，而不是 OOF 行中的 ``actual``，因此未来真实值不会
-    参与当前时刻的校准。``warmup_rows`` 用于热启动评估：每折前若干个
-    origin 仅用于填充状态，并通过标记列排除出正式评分。
+    参与当前时刻的校准。``warmup_rows`` 用于折内 warm-up 评估：每折前若干个
+    origin 仅用于填充状态，并通过标记列排除出正式评分；它不是跨折外部热启动。
     """
 
     required = {
@@ -286,18 +312,15 @@ def apply_online_calibration_to_oof(
         complete_mask = prediction_wide.notna().all(axis=1) & current_wide.notna().all(axis=1)
         complete_mask &= np.isfinite(prediction_wide).all(axis=1)
         complete_mask &= np.isfinite(current_wide).all(axis=1)
-        complete_times = prediction_wide.index[complete_mask]
-        if len(complete_times):
-            calibrated = apply_online_calibration(
-                prediction_wide.loc[complete_times],
-                current_wide.loc[complete_times],
-                targets,
-                horizons,
-                mode=mode,
-                **kwargs,
-            )
-        else:
-            calibrated = prediction_wide.iloc[0:0].copy()
+        calibrated = apply_online_calibration(
+            prediction_wide,
+            current_wide,
+            targets,
+            horizons,
+            mode=mode,
+            allow_missing=True,
+            **kwargs,
+        )
         calibrated_records: list[pd.DataFrame] = []
         for target in targets:
             for horizon in horizons:
@@ -310,16 +333,17 @@ def apply_online_calibration_to_oof(
         calibrated_long = pd.concat(calibrated_records, ignore_index=True).set_index(
             ["origin_time", "target", "horizon"]
         )["value"]
-        complete_part = part[part["origin_time"].isin(complete_times)]
         part_keys = pd.MultiIndex.from_frame(
-            complete_part[["origin_time", "target", "horizon"]].assign(
-                horizon=complete_part["horizon"].astype(int)
+            part[["origin_time", "target", "horizon"]].assign(
+                horizon=part["horizon"].astype(int)
             )
         )
         values = calibrated_long.reindex(part_keys).to_numpy(dtype=float)
-        work.loc[complete_part.index, output_column] = values
+        finite_values = np.isfinite(values)
+        if finite_values.any():
+            work.loc[part.index[finite_values], output_column] = values[finite_values]
 
-        warmup_origins = set(complete_times[:warmup_rows])
+        warmup_origins = set(prediction_wide.index[:warmup_rows])
         work.loc[positions, warmup_column] = work.loc[positions, "origin_time"].isin(
             warmup_origins
         )

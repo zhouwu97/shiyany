@@ -95,7 +95,7 @@ python scripts/apply_online_oof.py `
   --warmup-rows 0
 ```
 
-`--warmup-rows 0` 是冷启动；设置为正数时，每个外层折的前若干个 origin 只用于热启动、不计入在线候选评分。数据末端若缺少完整目标×步长组合，候选会保留基础预测并在报告中登记 fallback 行数。
+`--warmup-rows 0` 是 cold-start OOF；设置为正数时，是 within-fold warm-up OOF：每个外层折的前若干个 origin 只用于填充状态、不计入在线候选评分，不代表跨折外部热启动。数据末端若缺少完整目标×步长组合，候选会保留基础预测并在报告中登记 fallback 行数。
 
 所有命令默认写入 `results/raw/runs/{oof,comparisons,training,experiments,audits}/<运行时间>/` 分类目录。每个运行目录包含报告、manifest、日志和 checkpoint；指定同一 `--run-dir` 可从已完成折继续。最近一次各类运行的指针在 `results/latest/`。
 

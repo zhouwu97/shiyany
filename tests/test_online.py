@@ -75,7 +75,7 @@ def test_vintage_mode_fuses_previous_prediction_for_same_target_time() -> None:
     assert calibrated.loc[base.index[1], "generator_1_t+15_pred"] == 110.0
 
 
-def test_oof_adapter_cold_starts_each_outer_fold_and_marks_hot_warmup() -> None:
+def test_oof_adapter_cold_starts_each_outer_fold_and_marks_within_fold_warmup() -> None:
     index = pd.date_range("2025-01-01", periods=4, freq="15min")
     rows = pd.DataFrame(
         {
@@ -111,3 +111,38 @@ def test_oof_adapter_cold_starts_each_outer_fold_and_marks_hot_warmup() -> None:
         warmup_rows=1,
     )
     assert hot["v1_online_bias_pred_is_warmup"].tolist() == [True, False, True, False]
+
+
+def test_oof_adapter_processes_state_through_an_intermediate_partial_origin() -> None:
+    index = pd.date_range("2025-01-01", periods=3, freq="15min")
+    rows = pd.DataFrame(
+        {
+            "fold": ["fold_a"] * 5,
+            "origin_time": [index[0], index[0], index[1], index[2], index[2]],
+            "target": [
+                "generator_1",
+                "generator_1",
+                "generator_1",
+                "generator_1",
+                "generator_1",
+            ],
+            "horizon": [15, 30, 15, 15, 30],
+            "actual": [100.0] * 5,
+            "current_value": [100.0] * 5,
+            "v1_pred": [110.0] * 5,
+        }
+    )
+
+    calibrated = apply_online_calibration_to_oof(
+        rows,
+        "v1_pred",
+        ("generator_1",),
+        (1, 2),
+        mode="bias",
+        half_life=1,
+    )
+
+    # t+15 在缺少 t1 的 t+30 行时仍然成熟，后续状态不能被跳过的 origin 卡住。
+    assert calibrated.loc[2, "v1_online_bias_pred"] == 105.0
+    assert calibrated.loc[3, "v1_online_bias_pred"] == 105.0
+    assert bool(calibrated.loc[2, "v1_online_bias_pred_is_fallback"]) is True

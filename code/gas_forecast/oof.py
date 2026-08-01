@@ -13,6 +13,7 @@ from joblib import Parallel, delayed
 
 from gas_forecast.config import ForecastConfig
 from gas_forecast.model_ensemble import GasAwareEnsembleForecaster
+from gas_forecast.model_horizon import HorizonSpecificRidgeForecaster
 from gas_forecast.model_v1 import RidgeDeltaForecaster
 from gas_forecast.regimes import attach_regimes
 from gas_forecast.scoring import ScoreSpec, absolute_percentage_error, score_oof_long
@@ -21,6 +22,7 @@ from gas_forecast.targets import build_delta_targets
 
 
 SUPPORTED_LEGACY_MODELS = ("v1", "v2", "v25", "v3")
+SUPPORTED_OOF_MODELS = SUPPORTED_LEGACY_MODELS + ("horizon_ridge",)
 
 
 @dataclass(frozen=True)
@@ -34,7 +36,9 @@ def _make_model(version: str, config: ForecastConfig):
         return RidgeDeltaForecaster(config)
     if version in {"v2", "v25", "v3"}:
         return GasAwareEnsembleForecaster(version, config)
-    raise ValueError(f"不支持的旧版 OOF 模型: {version}")
+    if version == "horizon_ridge":
+        return HorizonSpecificRidgeForecaster(config)
+    raise ValueError(f"不支持的 OOF 模型: {version}")
 
 
 def _base_fold_rows(
@@ -141,7 +145,7 @@ def build_legacy_oof(
 
     config = config or ForecastConfig()
     versions_tuple = tuple(dict.fromkeys(versions))
-    invalid = sorted(set(versions_tuple).difference(SUPPORTED_LEGACY_MODELS))
+    invalid = sorted(set(versions_tuple).difference(SUPPORTED_OOF_MODELS))
     if invalid:
         raise ValueError(f"不支持的版本: {invalid}")
     deltas = build_delta_targets(frame, config.targets, config.feature.horizons)
