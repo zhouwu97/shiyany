@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import ruptures as rpt
 from catboost import CatBoostRegressor, Pool
+from lightgbm import LGBMRegressor, early_stopping
 from sklearn.impute import SimpleImputer
 
 from gas_forecast.config import ForecastConfig
@@ -18,6 +19,16 @@ from gas_forecast.targets import target_columns
 class CatBoostTargetState:
     imputer: SimpleImputer
     models: list[CatBoostRegressor]
+    delta_lower: np.ndarray
+    delta_upper: np.ndarray
+
+
+@dataclass
+class LightGBMTargetState:
+    """直接增量 LightGBM 的单目标状态。"""
+
+    imputer: SimpleImputer
+    models: list[LGBMRegressor]
     delta_lower: np.ndarray
     delta_upper: np.ndarray
 
@@ -151,3 +162,106 @@ class CatBoostDeltaForecaster:
             for step, horizon in enumerate(self.config.feature.horizons):
                 predictions[f"{target}_t+{15 * horizon}_pred"] = absolute[:, step]
         return pd.DataFrame(predictions, index=features.index)
+
+
+class LightGBMDirectDeltaForecaster:
+    """直接预测绝对增量的浅层 LightGBM，仅用于有限复验。"""
+
+    version = "lgb_direct"
+
+    def __init__(self, config: ForecastConfig | None = None) -> None:
+        self.config = config or ForecastConfig()
+        self.feature_columns_: list[str] = []
+        self.states_: dict[str, LightGBMTargetState] = {}
+
+    @staticmethod
+    def _magnitude_weights(future_absolute: np.ndarray) -> np.ndarray:
+        magnitude = np.abs(np.asarray(future_absolute, dtype=float))
+        lower = max(float(np.nanquantile(magnitude, 0.05)), 1e-6)
+        upper = max(float(np.nanquantile(magnitude, 0.95)), lower)
+        weights = 1.0 / np.clip(magnitude, lower, upper)
+        return weights / weights.mean()
+
+    def _model(self, step: int, n_estimators: int) -> LGBMRegressor:
+        return LGBMRegressor(
+            objective=self.config.model.lgb_objective,
+            n_estimators=n_estimators,
+            learning_rate=self.config.model.lgb_learning_rate,
+            num_leaves=self.config.model.lgb_num_leaves,
+            max_depth=self.config.model.lgb_max_depth,
+            min_child_samples=self.config.model.lgb_min_child_samples,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            reg_alpha=1.0,
+            reg_lambda=5.0,
+            random_state=self.config.model.random_state + step,
+            n_jobs=self.config.model.tree_threads_per_worker,
+            verbosity=-1,
+        )
+
+    def fit(
+        self,
+        features: pd.DataFrame,
+        deltas: pd.DataFrame,
+        current: pd.DataFrame,
+    ) -> "LightGBMDirectDeltaForecaster":
+        self.feature_columns_ = list(features.columns)
+        for target in self.config.targets:
+            columns = target_columns(target, self.config.feature.horizons)
+            valid = current[target].notna() & deltas[columns].notna().all(axis=1)
+            x = features.loc[valid, self.feature_columns_]
+            y = deltas.loc[valid, columns]
+            if len(x) < 400:
+                raise ValueError(f"{target} 的直接 LightGBM 有效训练样本不足 400 行")
+            imputer = SimpleImputer(strategy="median", keep_empty_features=True)
+            matrix = imputer.fit_transform(x)
+            split = min(max(300, int(len(x) * 0.85)), len(x) - 96)
+            models: list[LGBMRegressor] = []
+            for step, column in enumerate(columns):
+                target_values = y[column].to_numpy(dtype=float)
+                future_absolute = current.loc[valid, target].to_numpy(dtype=float) + target_values
+                weights = (
+                    self._magnitude_weights(future_absolute)
+                    if self.config.model.lgb_use_mape_weights
+                    else np.ones(len(target_values), dtype=float)
+                )
+                probe = self._model(step, self.config.model.lgb_max_estimators)
+                fit_kwargs: dict[str, object] = {"sample_weight": weights[:split]}
+                if self.config.model.lgb_use_early_stopping:
+                    fit_kwargs["eval_set"] = [(matrix[split:], target_values[split:])]
+                    fit_kwargs["eval_sample_weight"] = [weights[split:]]
+                    fit_kwargs["callbacks"] = [
+                        early_stopping(
+                            self.config.model.lgb_early_stopping_rounds,
+                            verbose=False,
+                        )
+                    ]
+                probe.fit(matrix[:split], target_values[:split], **fit_kwargs)
+                iterations = int(probe.best_iteration_ or self.config.model.lgb_n_estimators)
+                model = self._model(step, max(20, iterations))
+                model.fit(matrix, target_values, sample_weight=weights)
+                models.append(model)
+            self.states_[target] = LightGBMTargetState(
+                imputer=imputer,
+                models=models,
+                delta_lower=y.quantile(self.config.model.lower_quantile).to_numpy(dtype=float),
+                delta_upper=y.quantile(self.config.model.upper_quantile).to_numpy(dtype=float),
+            )
+        return self
+
+    def predict(self, features: pd.DataFrame, current: pd.DataFrame) -> pd.DataFrame:
+        if not self.states_:
+            raise RuntimeError("直接 LightGBM 尚未训练")
+        output: dict[str, np.ndarray] = {}
+        for target in self.config.targets:
+            state = self.states_[target]
+            matrix = state.imputer.transform(features.reindex(columns=self.feature_columns_))
+            delta = np.column_stack([model.predict(matrix) for model in state.models])
+            delta = np.clip(delta, state.delta_lower, state.delta_upper)
+            absolute = current[target].ffill().to_numpy(dtype=float)[:, None] + delta
+            for step, horizon in enumerate(self.config.feature.horizons):
+                output[f"{target}_t+{15 * horizon}_pred"] = absolute[:, step]
+        result = pd.DataFrame(output, index=features.index)
+        if not np.isfinite(result.to_numpy(dtype=float)).all():
+            raise ValueError("直接 LightGBM 预测包含非有限值")
+        return result

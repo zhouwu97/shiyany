@@ -152,3 +152,5 @@ python scripts/export_json.py --input submissions/final/s_result.csv --output su
 测试期每一行只能在该行对应的滚动起点作为当前输入使用，后续行不能进入当前预测。不得根据测试集未来真实值反推模型、阈值、融合权重或版本。若需要本地查看测试得分，必须先冻结预测文件，再运行独立的 `scripts/evaluate_frozen.py`；该结果只用于最终评估，不得反馈到训练过程。
 
 完整阶段、验收标准和分段提交设计见 [实施计划](docs/IMPLEMENTATION_PLAN.md)。实验结论与路线裁决分别记录在 [RESULTS_REPORT.md](RESULTS_REPORT.md) 和 [DECISIONS.md](DECISIONS.md)。
+
+PR #1 之后的 `generator_1` 专项 Ridge、时间漂移、价格、加权损失、受限树模型、真正 OOF hot start、状态专家和路径候选，统一通过[研究工作流](docs/RESEARCH_WORKFLOW.md)运行；该入口默认不触碰 blind，也不会自动覆盖 `results/best/`。

@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from gas_forecast.config import ForecastConfig
-from gas_forecast.model_v1 import _mape, make_ridge_pipeline
+from gas_forecast.model_v1 import _mape, make_ridge_pipeline, make_weighted_lad_pipeline
 from gas_forecast.targets import target_columns
 
 
@@ -20,6 +20,7 @@ class HorizonTargetState:
     weights: np.ndarray
     delta_lower: np.ndarray
     delta_upper: np.ndarray
+    alphas: np.ndarray
 
 
 class HorizonSpecificRidgeForecaster:
@@ -31,6 +32,93 @@ class HorizonSpecificRidgeForecaster:
         self.config = config or ForecastConfig()
         self.feature_columns_: list[str] = []
         self.states_: dict[str, HorizonTargetState] = {}
+
+    def _alpha_for(self, target: str, horizon: int) -> float:
+        """解析 generator_1 的短/长步长正则组，其余目标保持基础正则。"""
+
+        alpha = self.config.model.ridge_alpha
+        if target != "generator_1":
+            return alpha
+        split = len(self.config.feature.horizons) // 2
+        position = self.config.feature.horizons.index(horizon)
+        configured = (
+            self.config.model.generator1_short_alpha
+            if position < split
+            else self.config.model.generator1_long_alpha
+        )
+        if configured is None:
+            return alpha
+        if configured <= 0:
+            raise ValueError("Ridge alpha 必须为正数")
+        return float(configured)
+
+    def _apply_hard_recency(
+        self,
+        x: pd.DataFrame,
+        y: pd.DataFrame,
+        anchor: pd.Series,
+    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
+        """仅在明确要求时截取固定近期窗口。"""
+
+        mode = self.config.model.ridge_recency_mode
+        if mode not in {"all", "hard", "exp"}:
+            raise ValueError(f"不支持的 Ridge 时间漂移模式: {mode}")
+        if mode != "hard":
+            return x, y, anchor
+        days = self.config.model.ridge_hard_window_days
+        if days is None or days <= 0:
+            raise ValueError("hard recency 需要正数 ridge_hard_window_days")
+        recent = x.index >= x.index.max() - pd.Timedelta(days=days)
+        if int(recent.sum()) < 200:
+            raise ValueError(f"{days} 天硬窗口的逐步长 Ridge 有效样本不足 200 行")
+        return x.loc[recent], y.loc[recent], anchor.loc[recent]
+
+    def _sample_weight(
+        self, index: pd.DatetimeIndex, future_absolute: np.ndarray
+    ) -> np.ndarray:
+        """组合指数时间衰减和未来绝对量权重，并归一化为均值一。"""
+
+        weights = np.ones(len(index), dtype=float)
+        if self.config.model.ridge_recency_mode == "exp":
+            half_life = self.config.model.ridge_half_life_days
+            if half_life is None or half_life <= 0:
+                raise ValueError("exp recency 需要正数 ridge_half_life_days")
+            age = (index.max() - index).total_seconds() / 86_400.0
+            weights *= np.exp(-np.log(2.0) * np.asarray(age, dtype=float) / half_life)
+
+        magnitude = np.abs(np.asarray(future_absolute, dtype=float))
+        lower = max(float(np.nanquantile(magnitude, 0.05)), 1e-6)
+        upper = max(float(np.nanquantile(magnitude, 0.95)), lower)
+        clipped = np.clip(magnitude, lower, upper)
+        mode = self.config.model.ridge_magnitude_weighting
+        if mode == "uniform":
+            pass
+        elif mode in {"inverse_absolute", "inverse_abs"}:
+            weights /= clipped
+        elif mode in {"inverse_squared", "inverse_abs_squared"}:
+            weights /= clipped**2
+        else:
+            raise ValueError(f"不支持的 Ridge 绝对量权重: {mode}")
+        if not np.isfinite(weights).all() or float(weights.mean()) <= 0:
+            raise ValueError("Ridge 样本权重无效")
+        return weights / weights.mean()
+
+    def _make_pipeline(self, alpha: float):
+        if self.config.model.ridge_loss == "ridge":
+            return make_ridge_pipeline(alpha), "ridge"
+        if self.config.model.ridge_loss == "weighted_lad":
+            return make_weighted_lad_pipeline(self.config.model.weighted_lad_alpha), "lad"
+        raise ValueError(f"不支持的线性损失: {self.config.model.ridge_loss}")
+
+    @staticmethod
+    def _fit_pipeline(
+        pipeline: object,
+        step_name: str,
+        x: pd.DataFrame,
+        y: pd.Series,
+        sample_weight: np.ndarray,
+    ) -> None:
+        pipeline.fit(x, y, **{f"{step_name}__sample_weight": sample_weight})
 
     def fit(
         self,
@@ -48,6 +136,7 @@ class HorizonSpecificRidgeForecaster:
             x = features.loc[valid]
             y = deltas.loc[valid, columns]
             anchor = current.loc[valid, target]
+            x, y, anchor = self._apply_hard_recency(x, y, anchor)
             if len(x) < 200:
                 raise ValueError(f"{target} 的逐步长 Ridge 有效训练样本不足 200 行")
 
@@ -63,9 +152,22 @@ class HorizonSpecificRidgeForecaster:
             weights = []
             lowers = []
             uppers = []
+            alphas = []
             for step, column in enumerate(columns):
-                probe = make_ridge_pipeline(self.config.model.ridge_alpha)
-                probe.fit(development_x, y.iloc[:development_end][column])
+                horizon = horizons[step]
+                alpha = self._alpha_for(target, horizon)
+                future_absolute = anchor.to_numpy(dtype=float) + y[column].to_numpy(dtype=float)
+                development_weight = self._sample_weight(
+                    development_x.index, future_absolute[:development_end]
+                )
+                probe, probe_step = self._make_pipeline(alpha)
+                self._fit_pipeline(
+                    probe,
+                    probe_step,
+                    development_x,
+                    y.iloc[:development_end][column],
+                    development_weight,
+                )
                 probe_prediction = calibration_anchor + probe.predict(calibration_x)
                 scores = [
                     _mape(
@@ -75,9 +177,16 @@ class HorizonSpecificRidgeForecaster:
                     for weight in grid
                 ]
                 weights.append(float(grid[int(np.argmin(scores))]))
-                model = make_ridge_pipeline(self.config.model.ridge_alpha)
-                model.fit(x, y[column])
+                model, model_step = self._make_pipeline(alpha)
+                self._fit_pipeline(
+                    model,
+                    model_step,
+                    x,
+                    y[column],
+                    self._sample_weight(x.index, future_absolute),
+                )
                 models.append(model)
+                alphas.append(alpha)
                 lowers.append(float(y[column].quantile(self.config.model.lower_quantile)))
                 uppers.append(float(y[column].quantile(self.config.model.upper_quantile)))
             self.states_[target] = HorizonTargetState(
@@ -85,6 +194,7 @@ class HorizonSpecificRidgeForecaster:
                 weights=np.asarray(weights, dtype=float),
                 delta_lower=np.asarray(lowers, dtype=float),
                 delta_upper=np.asarray(uppers, dtype=float),
+                alphas=np.asarray(alphas, dtype=float),
             )
         return self
 
@@ -108,16 +218,20 @@ class HorizonSpecificRidgeForecaster:
 
     @staticmethod
     def _apply_constraints(output: pd.DataFrame) -> None:
-        for horizon in sorted(
+        horizons = sorted(
             int(column.rsplit("_t+", 1)[1].removesuffix("_pred"))
             for column in output.columns
-            if column.startswith("generator_1_t+")
-        ):
+            if column.startswith("generator_1_t+") or column.startswith("generator_all_t+")
+        )
+        for horizon in horizons:
             gen1 = f"generator_1_t+{horizon}_pred"
             total = f"generator_all_t+{horizon}_pred"
-            output[gen1] = output[gen1].clip(0.0, 200.0)
-            output[total] = output[total].clip(0.0, 440.0)
-            output[total] = np.maximum(output[total], output[gen1])
-            output[total] = np.minimum(output[total], output[gen1] + 240.0)
+            if gen1 in output:
+                output[gen1] = output[gen1].clip(0.0, 200.0)
+            if total in output:
+                output[total] = output[total].clip(0.0, 440.0)
+            if gen1 in output and total in output:
+                output[total] = np.maximum(output[total], output[gen1])
+                output[total] = np.minimum(output[total], output[gen1] + 240.0)
         if not np.isfinite(output.to_numpy()).all():
             raise ValueError("逐步长 Ridge 预测包含非有限值")

@@ -212,6 +212,96 @@ def apply_online_calibration(
     )
 
 
+def apply_online_calibration_hot_start(
+    base_predictions: pd.DataFrame,
+    current: pd.DataFrame,
+    targets: tuple[str, ...],
+    horizons: tuple[int, ...],
+    *,
+    calibration_predictions: pd.DataFrame,
+    calibration_current: pd.DataFrame,
+    mode: str = "bias",
+    allow_missing: bool = False,
+    **kwargs: object,
+) -> pd.DataFrame:
+    """以验证块之前真正 OOF 的预测历史初始化在线状态后再预测验证块。
+
+    ``calibration_predictions`` 必须由每个起点之前训练的基础模型产生；本函数
+    只负责保证时间边界与状态推进，不能接受训练集 fitted residual 的替代品。
+    """
+
+    if calibration_predictions.empty:
+        raise ValueError("真正 hot start 需要非空的 OOF calibration history")
+    if not calibration_predictions.index.equals(calibration_current.index):
+        raise ValueError("calibration 预测和当前观测必须使用相同时间索引")
+    if not base_predictions.index.equals(current.index):
+        raise ValueError("验证预测和当前观测必须使用相同时间索引")
+    if not calibration_predictions.index.is_monotonic_increasing:
+        raise ValueError("calibration history 时间必须递增")
+    if not base_predictions.index.is_monotonic_increasing:
+        raise ValueError("验证块时间必须递增")
+    if calibration_predictions.index.max() >= base_predictions.index.min():
+        raise ValueError("calibration history 必须严格早于验证块")
+    calibrator = OnlineForecastCalibrator(horizons, mode=mode, **kwargs)
+    calibrator.walk_forward(
+        calibration_predictions,
+        calibration_current,
+        targets,
+        allow_missing=allow_missing,
+    )
+    return calibrator.walk_forward(
+        base_predictions,
+        current,
+        targets,
+        allow_missing=allow_missing,
+    )
+
+
+def apply_online_calibration_hot_start_pipeline(
+    base_predictions: pd.DataFrame,
+    current: pd.DataFrame,
+    targets: tuple[str, ...],
+    horizons: tuple[int, ...],
+    *,
+    calibration_predictions: pd.DataFrame,
+    calibration_current: pd.DataFrame,
+    modes: tuple[str, ...],
+    allow_missing: bool = False,
+    **kwargs: object,
+) -> pd.DataFrame:
+    """按给定顺序组合不超过两个真正 hot-start 在线模块。"""
+
+    if not modes or len(modes) > 2:
+        raise ValueError("在线组合必须包含一到两个模块")
+    if len(set(modes)) != len(modes):
+        raise ValueError("在线组合不能重复同一模块")
+    if calibration_predictions.empty:
+        raise ValueError("真正 hot start 需要非空的 OOF calibration history")
+    if not calibration_predictions.index.equals(calibration_current.index):
+        raise ValueError("calibration 预测和当前观测必须使用相同时间索引")
+    if not base_predictions.index.equals(current.index):
+        raise ValueError("验证预测和当前观测必须使用相同时间索引")
+    if calibration_predictions.index.max() >= base_predictions.index.min():
+        raise ValueError("calibration history 必须严格早于验证块")
+    history = calibration_predictions.copy()
+    output = base_predictions.copy()
+    for mode in modes:
+        calibrator = OnlineForecastCalibrator(horizons, mode=mode, **kwargs)
+        history = calibrator.walk_forward(
+            history,
+            calibration_current,
+            targets,
+            allow_missing=allow_missing,
+        )
+        output = calibrator.walk_forward(
+            output,
+            current,
+            targets,
+            allow_missing=allow_missing,
+        )
+    return output
+
+
 def apply_online_calibration_to_oof(
     rows: pd.DataFrame,
     base_column: str,

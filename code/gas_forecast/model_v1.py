@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from sklearn.impute import SimpleImputer
 from sklearn.isotonic import IsotonicRegression
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import QuantileRegressor, Ridge
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
@@ -27,6 +27,18 @@ def make_ridge_pipeline(alpha: float) -> Pipeline:
             ("imputer", SimpleImputer(strategy="median", keep_empty_features=True)),
             ("scale", StandardScaler()),
             ("ridge", Ridge(alpha=alpha)),
+        ]
+    )
+
+
+def make_weighted_lad_pipeline(alpha: float) -> Pipeline:
+    """返回中位数 LAD 管线；样本权重由调用方按未来绝对量提供。"""
+
+    return Pipeline(
+        [
+            ("imputer", SimpleImputer(strategy="median", keep_empty_features=True)),
+            ("scale", StandardScaler()),
+            ("lad", QuantileRegressor(quantile=0.5, alpha=alpha, solver="highs")),
         ]
     )
 
@@ -134,12 +146,15 @@ class RidgeDeltaForecaster:
             minutes = 15 * horizon
             generator_1 = f"generator_1_t+{minutes}_pred"
             generator_all = f"generator_all_t+{minutes}_pred"
-            output[generator_1] = output[generator_1].clip(lower=0.0, upper=200.0)
-            output[generator_all] = output[generator_all].clip(lower=0.0, upper=440.0)
-            output[generator_all] = np.maximum(output[generator_all], output[generator_1])
-            # 其余两套机组总容量为 240MW，修正 generator_rest 的物理上界。
-            output[generator_all] = np.minimum(
-                output[generator_all], output[generator_1] + 240.0
-            )
+            if generator_1 in output:
+                output[generator_1] = output[generator_1].clip(lower=0.0, upper=200.0)
+            if generator_all in output:
+                output[generator_all] = output[generator_all].clip(lower=0.0, upper=440.0)
+            if generator_1 in output and generator_all in output:
+                output[generator_all] = np.maximum(output[generator_all], output[generator_1])
+                # 其余两套机组总容量为 240MW，修正 generator_rest 的物理上界。
+                output[generator_all] = np.minimum(
+                    output[generator_all], output[generator_1] + 240.0
+                )
         if not np.isfinite(output.to_numpy()).all():
             raise ValueError("预测结果包含非有限值")

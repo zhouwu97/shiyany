@@ -215,3 +215,18 @@ within-fold warm-up 结果同样未通过 blind 折不退化门槛，所有在�
 - 收尾时执行 `scripts/prepare_submission.py --no-open`，提交校验通过；`results/best/submission.zip` 与 `提交这个/teamname_gas_predict_prelim.zip` 均只有 `result.csv`，SHA256 都为 `0ca59bb6e66004ae95efa64000ecbf81a86bcc988f0559cae33dc0b7e0d7fb27`。
 - 两份 `result.csv` 的字节内容和逐元素内容均一致，SHA256 都为 `a1124f9fe1991c06d4b4d81e841e6296e86c206a424ba78fdb1a48a2dd656e77`，形状为 `192×17`；因此本 PR 不会改变当前待提交 ZIP。
 - 对既有 `results/raw/runs/comparisons/2026-07-31_23-51-56/routed.csv` 做与 `RoutedLegacyForecaster.predict()` 相同的确定性后处理审计：无新增上下界裁剪单元；`generator_all > generator_1 + 240` 的 796 个 OOF 单元被收缩，`generator_all < generator_1` 为 0 个，其中 blind 为 48 个。总 MAPE 从 5.3062% 降到 5.3020%，`generator_all` 从 4.4812% 降到 4.4728%，blind 从 5.8039% 降到 5.7997%。该项是对已有 OOF 的后处理影响量化，不重训、不替换冻结提交。
+
+## 2026-08-01 Phase 1 30 天指数时间衰减验收
+
+本轮先在固定 5 折快筛拒绝了目标时刻对齐扩展（E11/E12），并发现长步长 `alpha=5` 的收益仅 0.002 个百分点，未冻结。随后只在 E10 核心 `generator_1` Horizon Ridge 上比较时间漂移。E21 的完整 development OOF 与 final blind 验收均使用冻结的 `generator_all -> V3` 路由、120 分钟 purge 和同一批外层折。
+
+| final 候选 | pooled MAPE | `generator_1` | `generator_all` | 优于基线折数 |
+| --- | ---: | ---: | ---: | ---: |
+| E10 核心基线 | 5.3160% | 6.1603% | 4.4717% | — |
+| **E21，指数半衰期 30d** | **5.3017%** | **6.1319%** | **4.4715%** | **14/20** |
+
+- pooled 改善 0.0143 个百分点，`generator_1` 改善 0.0283 个百分点；最大单折退化为 0.0362 个百分点，低于 0.1 个百分点正式门槛。
+- 独立 blind 折从 5.7504% 降至 5.7243%，改善 0.0262 个百分点；`generator_1` 从 6.08% 降至 6.03%。因此没有出现 blind 反转。
+- 完整开发 OOF、最终验收报告和逐折预测分别登记在 `results/raw/runs/experiments/e21_recency_development_20260801_1641/` 与 `results/raw/runs/experiments/e21_recency_final_20260801_1657/`。
+- 已按 final 报告全量训练 `generator1_horizon`，模型为 `results/raw/runs/training/e21_recency_30d_full_20260801_1714/model.joblib`；泄漏审计覆盖 50 个 origin、5 类未来扰动、250 个案例，全部通过，报告位于 `results/raw/runs/audit/e21_recency_30d_20260801_1717/report.json`。
+- 该训练产物尚未覆盖 `results/best/` 或现有提交 ZIP；是否晋级为正式提交由后续明确发布动作决定。

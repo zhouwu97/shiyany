@@ -120,6 +120,50 @@ def _add_target_aligned_features(
         output[f"feat_{target}_aligned_h{horizon}_vs_current"] = series - matrix.iloc[:, 0]
 
 
+def _is_core_dynamic_column(column: str) -> bool:
+    """识别生产侧的核心动态字段，不把所有原始字段默认扩展一遍。"""
+
+    return (
+        column in {"generator_1", "generator_all"}
+        or column.startswith("generator_use_")
+        or "gas_holder" in column
+        or "blast_furnace" in column
+        or "coke" in column
+        or "converter" in column
+    )
+
+
+def _add_dynamic_features(
+    output: dict[str, pd.Series | np.ndarray],
+    filled: pd.DataFrame,
+    config: FeatureConfig,
+) -> None:
+    """为核心或全部生产字段加入轻量、严格因果的动态统计。"""
+
+    scope = config.dynamic_feature_scope
+    if scope not in {"none", "core", "all"}:
+        raise ValueError(f"不支持的动态特征范围: {scope}")
+    if scope == "none":
+        return
+    columns = list(filled.columns) if scope == "all" else [
+        column for column in filled.columns if _is_core_dynamic_column(column)
+    ]
+    for column in columns:
+        series = filled[column]
+        prefix = f"feat_dynamic_{column}"
+        for lag in config.dynamic_lags:
+            output[f"{prefix}_lag_{lag}"] = series.shift(lag)
+            output[f"{prefix}_diff_{lag}"] = series - series.shift(lag)
+        history = series.shift(1)
+        for window in config.dynamic_rolling_windows:
+            rolling = history.rolling(window, min_periods=max(2, window // 2))
+            output[f"{prefix}_mean_{window}"] = rolling.mean()
+            output[f"{prefix}_std_{window}"] = rolling.std()
+            output[f"{prefix}_slope_{window}"] = (
+                series - series.shift(window - 1)
+            ) / max(window - 1, 1)
+
+
 def build_causal_features(
     frame: pd.DataFrame,
     config: FeatureConfig | None = None,
@@ -324,6 +368,8 @@ def build_causal_features(
             if target in filled:
                 _add_target_aligned_features(feature_values, filled[target], target, config)
 
+    _add_dynamic_features(feature_values, filled, config)
+
     zero_candidates = generator_gas_columns + [
         "air_heater_5",
         "into_gas_mixed_blast_furnace",
@@ -342,8 +388,29 @@ def build_causal_features(
     feature_values["feat_month"] = index.month.astype("int8")
     feature_values["feat_time_sin"] = np.sin(2 * np.pi * minute_of_day / 1440)
     feature_values["feat_time_cos"] = np.cos(2 * np.pi * minute_of_day / 1440)
+    if config.enable_slot_one_hot:
+        slot = index.hour * 4 + index.minute // 15
+        for value in range(96):
+            feature_values[f"feat_slot_{value}"] = (slot == value).astype("int8")
+        weekday = index.dayofweek
+        for value in range(7):
+            feature_values[f"feat_weekday_{value}"] = (weekday == value).astype("int8")
+        feature_values["feat_is_weekend"] = (weekday >= 5).astype("int8")
+    if config.enable_time_fourier:
+        week_minutes = index.dayofweek * 1440 + minute_of_day
+        for harmonic in range(1, 5):
+            phase = 2 * np.pi * harmonic * minute_of_day / 1440
+            feature_values[f"feat_day_fourier_sin_{harmonic}"] = np.sin(phase)
+            feature_values[f"feat_day_fourier_cos_{harmonic}"] = np.cos(phase)
+        for harmonic in range(1, 3):
+            phase = 2 * np.pi * harmonic * week_minutes / (7 * 1440)
+            feature_values[f"feat_week_fourier_sin_{harmonic}"] = np.sin(phase)
+            feature_values[f"feat_week_fourier_cos_{harmonic}"] = np.cos(phase)
 
     if price_schedule is not None:
+        current_price = price_schedule.lookup(index)
+        if config.enable_price_delta_features or config.enable_price_interactions:
+            feature_values["feat_current_price"] = current_price
         prices: list[np.ndarray] = []
         for horizon in config.horizons:
             target_index = index + pd.Timedelta(minutes=15 * horizon)
@@ -355,6 +422,43 @@ def build_causal_features(
         first_change = np.where(changed.any(axis=1), changed.argmax(axis=1) + 1, 0)
         feature_values["feat_price_switch_within_120"] = changed.any(axis=1).astype("int8")
         feature_values["feat_steps_to_price_switch"] = first_change.astype("int8")
+        if config.enable_price_delta_features:
+            denominator = np.where(np.abs(current_price) > 1e-6, current_price, np.nan)
+            for step, horizon in enumerate(config.horizons):
+                minutes = 15 * horizon
+                delta = price_matrix[:, step] - current_price
+                feature_values[f"feat_price_delta_tplus_{minutes}"] = delta
+                feature_values[f"feat_price_ratio_tplus_{minutes}"] = (
+                    price_matrix[:, step] / denominator
+                )
+                feature_values[f"feat_price_direction_tplus_{minutes}"] = np.sign(delta).astype(
+                    "int8"
+                )
+            feature_values["feat_next_2h_price_max_delta"] = (
+                price_matrix.max(axis=1) - current_price
+            )
+            feature_values["feat_next_2h_price_min_delta"] = (
+                price_matrix.min(axis=1) - current_price
+            )
+        if config.enable_price_interactions:
+            for step, horizon in enumerate(config.horizons):
+                minutes = 15 * horizon
+                delta = price_matrix[:, step] - current_price
+                if "generator_1" in filled:
+                    feature_values[f"feat_generator1_price_delta_tplus_{minutes}"] = (
+                        filled["generator_1"] * delta
+                    )
+                feature_values[f"feat_generator_gas_total_price_delta_tplus_{minutes}"] = (
+                    generator_gas_total * delta
+                )
+                holder = filled.get("blast_furnace_gas_holder_2")
+                if holder is not None:
+                    feature_values[f"feat_gas_holder_price_delta_tplus_{minutes}"] = holder * delta
+                slope = feature_values.get("feat_generator_1_slope_4")
+                if slope is not None:
+                    feature_values[f"feat_generator1_slope_price_delta_tplus_{minutes}"] = (
+                        slope * delta
+                    )
 
     output = pd.DataFrame(feature_values, index=frame.index)
     output = output.replace([np.inf, -np.inf], np.nan)
@@ -370,6 +474,13 @@ def audit_feature_availability(columns: list[str]) -> dict[str, FeatureAvailabil
         if column.startswith("feat_target_price_tplus_"):
             minutes = int(column.rsplit("_", 1)[-1])
             metadata[column] = FeatureAvailability(minutes, known_in_advance=True)
+        elif "_price_delta_tplus_" in column or "_price_ratio_tplus_" in column or (
+            "_price_direction_tplus_" in column
+        ):
+            minutes = int(column.rsplit("_", 1)[-1])
+            metadata[column] = FeatureAvailability(minutes, known_in_advance=True)
+        elif column.startswith("feat_next_2h_price_"):
+            metadata[column] = FeatureAvailability(120, known_in_advance=True)
         elif "_lag_" in column:
             steps = int(column.rsplit("_", 1)[-1])
             metadata[column] = FeatureAvailability(-15 * steps)

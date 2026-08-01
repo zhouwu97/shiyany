@@ -3,7 +3,12 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from gas_forecast.online import apply_online_calibration, apply_online_calibration_to_oof
+from gas_forecast.online import (
+    apply_online_calibration,
+    apply_online_calibration_hot_start,
+    apply_online_calibration_hot_start_pipeline,
+    apply_online_calibration_to_oof,
+)
 
 
 def _inputs(rows: int = 8) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -146,3 +151,45 @@ def test_oof_adapter_processes_state_through_an_intermediate_partial_origin() ->
     assert calibrated.loc[2, "v1_online_bias_pred"] == 105.0
     assert calibrated.loc[3, "v1_online_bias_pred"] == 105.0
     assert bool(calibrated.loc[2, "v1_online_bias_pred_is_fallback"]) is True
+
+
+def test_true_hot_start_uses_only_prevalidation_oof_history() -> None:
+    history_base, history_current = _inputs(rows=5)
+    validation_base, validation_current = _inputs(rows=3)
+    validation_base.index = pd.date_range("2025-01-01 01:15:00", periods=3, freq="15min")
+    validation_current.index = validation_base.index
+
+    calibrated = apply_online_calibration_hot_start(
+        validation_base,
+        validation_current,
+        ("generator_1", "generator_all"),
+        (1, 2),
+        calibration_predictions=history_base,
+        calibration_current=history_current,
+        mode="bias",
+        half_life=1,
+    )
+
+    assert calibrated.iloc[0, 0] < validation_base.iloc[0, 0]
+
+
+def test_true_hot_start_pipeline_composes_only_requested_online_modules() -> None:
+    history_base, history_current = _inputs(rows=5)
+    validation_base, validation_current = _inputs(rows=3)
+    validation_base.index = pd.date_range("2025-01-01 01:15:00", periods=3, freq="15min")
+    validation_current.index = validation_base.index
+
+    calibrated = apply_online_calibration_hot_start_pipeline(
+        validation_base,
+        validation_current,
+        ("generator_1", "generator_all"),
+        (1, 2),
+        calibration_predictions=history_base,
+        calibration_current=history_current,
+        modes=("bias", "vintage"),
+        half_life=1,
+        vintage_weight=0.25,
+    )
+
+    assert np.isfinite(calibrated.to_numpy()).all()
+    assert calibrated.iloc[0, 0] < validation_base.iloc[0, 0]
