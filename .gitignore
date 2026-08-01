@@ -221,6 +221,7 @@ __marimo__/
 data/raw/
 煤气发电预测优化-初赛训练和测试集/
 data/interim/
+data/processed/
 artifacts/
 submissions/
 runs/

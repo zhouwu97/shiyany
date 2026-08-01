@@ -12,6 +12,7 @@ import pandas as pd
 
 from gas_forecast.config import ForecastConfig
 from gas_forecast.data import align_tables
+from gas_forecast.experiments import new_run_dir
 
 
 def main() -> None:
@@ -19,8 +20,11 @@ def main() -> None:
     parser.add_argument("--prediction", type=Path, required=True)
     parser.add_argument("--truth-dir", type=Path, required=True)
     parser.add_argument("--acknowledge-frozen-prediction", action="store_true")
-    parser.add_argument("--output", type=Path, default=Path("results/raw/frozen_test_score.json"))
+    parser.add_argument("--run-dir", type=Path)
+    parser.add_argument("--output", type=Path)
     args = parser.parse_args()
+    run_dir = args.run_dir or new_run_dir("results/raw/runs", "evaluate_frozen")
+    output = args.output or run_dir / "report.json"
     if not args.acknowledge_frozen_prediction:
         parser.error("必须确认预测已冻结：--acknowledge-frozen-prediction")
 
@@ -47,11 +51,10 @@ def main() -> None:
         "by_target_horizon": scores,
         "warning": "该结果不得反馈到训练、阈值、融合权重或版本选择。",
     }
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
     main()
-

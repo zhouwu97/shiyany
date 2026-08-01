@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from gas_forecast.config import FeatureConfig
+from gas_forecast.preprocessing import build_anomaly_channels
 
 
 @dataclass(frozen=True)
@@ -114,6 +115,24 @@ def build_causal_features(
         column: filled[column] for column in filled.columns
     }
 
+    anomaly_columns = [
+        "generator_1",
+        "generator_all",
+        "generator_use_blast_furnace_gas",
+        "generator_use_coke_gas",
+        "generator_use_converter_gas",
+        "blast_furnace_gas_holder_2",
+    ]
+    if config.enable_anomaly_features:
+        feature_values.update(
+            build_anomaly_channels(
+                numeric,
+                anomaly_columns,
+                window=config.anomaly_window,
+                threshold=config.anomaly_threshold,
+            )
+        )
+
     # 缺失标记的字段集合只由输入结构决定，不能因未来区间是否出现缺失而变化。
     for column in numeric.columns:
         feature_values[f"feat_missing_{column}"] = missing[column].astype("int8")
@@ -153,6 +172,47 @@ def build_causal_features(
     ]
     generator_gas_total = _sum_existing(filled, generator_gas_columns)
     feature_values["feat_generator_gas_total"] = generator_gas_total
+
+    # 三类煤气分别计算当前可见的供需守恒残差，不对缺少的用户字段作零值臆测。
+    blast_balance = (
+        bf_production
+        - air_heater_use
+        - bf_user_use
+        - mixed_bf
+        - filled.get("generator_use_blast_furnace_gas", np.nan)
+    )
+    coke_balance = (
+        filled.get("coke_oven_1", pd.Series(np.nan, index=filled.index))
+        - filled.get("into_gas_mixed_coke", 0.0)
+        - filled.get("generator_use_coke_gas", 0.0)
+    )
+    converter_users = _sum_existing(filled, ["converter_user1", "converter_user2"])
+    converter_balance = (
+        filled.get("converter_1", pd.Series(np.nan, index=filled.index))
+        - converter_users
+        - filled.get("into_gas_mixed_converter", 0.0)
+        - filled.get("generator_use_converter_gas", 0.0)
+    )
+    balances = {
+        "blast_balance": blast_balance,
+        "coke_balance": coke_balance,
+        "converter_balance": converter_balance,
+    }
+    if config.enable_physical_features:
+        for name, balance in balances.items():
+            feature_values[f"feat_{name}"] = balance
+            history = balance.shift(1)
+            for window in (4, 8, 16):
+                feature_values[f"feat_{name}_mean_{window}"] = history.rolling(
+                    window, min_periods=max(2, window // 2)
+                ).mean()
+            feature_values[f"feat_{name}_diff_1"] = balance.diff()
+            feature_values[f"feat_{name}_positive"] = balance.gt(0).astype("int8")
+            state_change = balance.gt(0).ne(balance.gt(0).shift(1))
+            feature_values[f"feat_{name}_state_changed"] = state_change.astype("int8")
+            feature_values[f"feat_{name}_state_age"] = state_change.groupby(
+                state_change.cumsum()
+            ).cumcount().astype("int32")
     for column in generator_gas_columns:
         if column in filled:
             denominator = generator_gas_total.replace(0, np.nan)
@@ -197,14 +257,42 @@ def build_causal_features(
         if column in filled:
             history_series[column] = (filled[column], False)
     history_series["bf_surplus_proxy"] = (feature_values["feat_bf_surplus_proxy"], False)
+    if config.enable_physical_features:
+        for name, balance in balances.items():
+            history_series[name] = (balance, False)
     if "blast_furnace_gas_holder_2" in filled:
         history_series["blast_furnace_gas_holder_2"] = (
             filled["blast_furnace_gas_holder_2"],
             True,
         )
 
+    if config.enable_physical_features and {"generator_1", "generator_all"}.issubset(filled.columns):
+        efficiency_series = {
+            "generator_1_efficiency": filled["generator_1"] / generator_gas_total.replace(0, np.nan),
+            "generator_all_efficiency": filled["generator_all"] / generator_gas_total.replace(0, np.nan),
+            "generator_rest_efficiency": (
+                filled["generator_all"] - filled["generator_1"]
+            ) / generator_gas_total.replace(0, np.nan),
+        }
+        for name, efficiency in efficiency_series.items():
+            feature_values[f"feat_{name}"] = efficiency
+            history_series[name] = (efficiency, False)
+
     for name, (series, include_range) in history_series.items():
         _add_history_features(feature_values, series, name, config, include_range=include_range)
+        if config.enable_long_cycle_features and name in {
+            "generator_1",
+            "generator_all",
+            "generator_rest",
+        }:
+            same_slots = pd.concat(
+                [series.shift(96 * day) for day in range(1, 15)], axis=1
+            )
+            feature_values[f"feat_{name}_same_slot_median_14d"] = same_slots.median(axis=1)
+            for days in (3, 7, 14):
+                baseline = same_slots.iloc[:, :days].mean(axis=1)
+                feature_values[f"feat_{name}_same_slot_mean_{days}d"] = baseline
+                feature_values[f"feat_{name}_vs_same_slot_mean_{days}d"] = series - baseline
 
     zero_candidates = generator_gas_columns + [
         "air_heater_5",

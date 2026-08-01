@@ -7,7 +7,7 @@ from pathlib import Path
 import joblib
 import pandas as pd
 
-from gas_forecast.config import ForecastConfig
+from gas_forecast.config import legacy_forecast_config
 from gas_forecast.data import align_tables, combine_context
 from gas_forecast.features import (
     build_causal_features,
@@ -15,6 +15,7 @@ from gas_forecast.features import (
 )
 from gas_forecast.model_v1 import RidgeDeltaForecaster
 from gas_forecast.model_ensemble import GasAwareEnsembleForecaster
+from gas_forecast.model_routed import RoutedLegacyForecaster
 from gas_forecast.targets import build_delta_targets
 
 
@@ -27,18 +28,27 @@ def train_model(
     data_dir: str | Path,
     output: str | Path,
     version: str = "v1",
-) -> RidgeDeltaForecaster | GasAwareEnsembleForecaster:
-    config = ForecastConfig()
+    *,
+    route: dict[str, object] | None = None,
+    n_jobs: int = 4,
+) -> RidgeDeltaForecaster | GasAwareEnsembleForecaster | RoutedLegacyForecaster:
+    config = legacy_forecast_config()
     dataset = align_tables(data_dir, config.feature.frequency)
     price_path = _find_price(data_dir)
     price = load_price_schedule(price_path) if price_path else None
     features = build_causal_features(dataset.frame, config.feature, price)
     deltas = build_delta_targets(dataset.frame, config.targets, config.feature.horizons)
-    model = (
-        RidgeDeltaForecaster(config)
-        if version == "v1"
-        else GasAwareEnsembleForecaster(version, config)
-    ).fit(
+    if version == "routed":
+        if route is None:
+            raise ValueError("训练 routed 模型必须提供冻结路由")
+        model = RoutedLegacyForecaster(route, config, n_jobs=n_jobs)
+    else:
+        model = (
+            RidgeDeltaForecaster(config)
+            if version == "v1"
+            else GasAwareEnsembleForecaster(version, config)
+        )
+    model.fit(
         features,
         deltas,
         dataset.frame.loc[:, list(config.targets)],
@@ -58,7 +68,9 @@ def predict_rolling(
     test_dir: str | Path,
     model_path: str | Path,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    model: RidgeDeltaForecaster | GasAwareEnsembleForecaster = joblib.load(model_path)
+    model: RidgeDeltaForecaster | GasAwareEnsembleForecaster | RoutedLegacyForecaster = joblib.load(
+        model_path
+    )
     train = align_tables(train_dir, model.config.feature.frequency).frame
     test = align_tables(test_dir, model.config.feature.frequency).frame
     context = combine_context(train, test)

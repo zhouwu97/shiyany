@@ -1,5 +1,37 @@
 # 实验结果
 
+## 2026-07-31 M1 共享逐行 OOF
+
+使用完全相同的 20 个外层滚动折，保存 62,858 条目标×步长预测单元；每行登记 `train_end` 并满足 120 分钟 purge。8 worker 完整回算耗时 33.7 分钟，折级结果即时保存。
+
+| 候选 | pooled MAPE | 旧折均值 MAPE |
+| --- | ---: | ---: |
+| Persistence | 5.5604% | 5.5474% |
+| V1 | 5.4073% | 5.3958% |
+| V2 | 5.3798% | 5.3703% |
+| V2.5 | 5.3435% | 5.3333% |
+| V3 | 5.3167% | 5.3055% |
+| **V2/V3 按目标路由** | **5.3062%** | **5.2947%** |
+| 稳定目标×步长 LOFO | 5.3062% | 5.2947% |
+
+稳定目标×步长路由回缩后等价于 `generator_1 -> V2`、`generator_all -> V3`。相对同口径 V3 改善约 0.0106 个百分点；旧折均值低于原报告 V3 的 5.3028%。
+
+## 2026-07-31 M2 cross-fitting blind smoke
+
+真实 blind 折使用 5 个内层 expanding 折、8 步 OOF 残差 LightGBM、三种 simplex、动态门控与三目标结构协调。运行耗时 469 秒。
+
+| 候选 | pooled MAPE |
+| --- | ---: |
+| Persistence | 6.1258% |
+| Ridge | 6.1428% |
+| OOF residual LightGBM | 8.4022% |
+| Simplex target | 6.0734% |
+| Simplex regularized | **6.0724%** |
+| Dynamic gate | 6.0924% |
+| Diagonal reconciliation | 6.0967% |
+
+该 smoke 中新体系未超过 M1 路由；完整 20 折正在验证，未据单折提前删除模块。
+
 ## 外部方案报告中的参考结果
 
 下列数值仅用于确定首轮实现优先级，尚未由本仓库复现：
@@ -103,3 +135,39 @@ V2 相对 V1：
 - 自动选择器因此保持V2，没有按平均MAPE单指标改选V2.5或V3。
 
 最终自动产物包含192个滚动起点、16个预测字段，时间范围为2025-05-01 00:00至2025-05-02 23:45；ZIP内仅有`result.csv`。整个自动流程明确登记`test_labels_used=false`、`leaderboard_feedback_used=false`和`manual_prediction_edits=false`。
+
+## 2026-08-01 M2/M3 完整 OOF 验收
+
+使用与 M1 相同的 20 个外层时间折、5 个 expanding 内层折和 120 分钟 purge，8 个 worker 并行，结果保存在 `results/raw/runs/2026-08-01_00-05-06_M2M3完整实验结果`。完整运行耗时 29.7 分钟，所有折均有 checkpoint。
+
+| 候选 | pooled MAPE |
+| --- | ---: |
+| Persistence | 5.5604% |
+| crossfit simplex horizon | 5.5195% |
+| simplex regularized | 5.5196% |
+| struct blended | 5.5196% |
+| dynamic gate | 5.5332% |
+| struct diagonal | 5.5354% |
+| OOF residual LightGBM | 7.4808% |
+
+M1 的 `m1_v2_v3_target` 为 5.3062%，因此 M2/M3 没有达到晋级门槛，正式选择器保持 M1；机械比较记录在 `results/raw/runs/2026-08-01_00-35-21_跨实验比较结果`。
+
+## 2026-08-01 M4 候选 smoke
+
+在最终 blind 折执行 CatBoost 和第一阶段 OOF 煤气轨迹两候选，运行目录为 `results/raw/runs/2026-08-01_00-38-03_M4冒烟结果`，耗时 233.5 秒。
+
+| 候选 | blind pooled MAPE | 结论 |
+| --- | ---: | --- |
+| M1 目标路由 | 5.8039% | 当前正式模型 |
+| CatBoost | 5.9211% | 拒绝，不启动 20 折 |
+| Gas trajectory | 6.3353% | 拒绝 |
+
+CatBoost 虽优于新 cross-fitting 候选，但未超过冻结的 M1；煤气轨迹两阶段分支存在误差传播且本折退化。两者均保留为独立 OOF 代码分支，不进入提交模型。
+
+## 2026-08-01 最终模型泄漏审计
+
+对冻结模型 `results/raw/runs/2026-07-31_23-53-00_正式模型结果/model.joblib` 执行 50 个起点、5 种未来扰动（extreme、shuffle、null、single_field、delete_future），共 250 个案例，8 worker。结果目录为 `results/raw/runs/2026-08-01_00-43-00_泄漏审计结果`，`passed=true`、失败数为 0。
+
+## 并行与复现记录
+
+实验脚本新增 `tree_threads_per_worker`：默认按逻辑核心数和实际外层 worker 数自动分配，避免外层 8 折同时运行时每个 CatBoost/LightGBM 进程都占满全部线程。一折 smoke 使用 16 线程；多折运行自动降到每折 2 线程。每次运行仍写入独立时间戳目录和逐折 checkpoint，可从中断位置恢复。

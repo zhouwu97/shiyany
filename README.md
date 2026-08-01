@@ -2,12 +2,12 @@
 
 面向“煤气发电量预测与发电优化”初赛的可复现实现。项目严格遵守预测起点之后的生产数据不可见这一约束，采用以下路线：
 
-> 因果时序清洗 -> 当前负荷持续性锚点 -> 未来绝对增量 Ridge -> 煤气/气柜增强 -> LightGBM 残差修正 -> 状态迁移与动态软门控。
+> 合规预处理 -> 共享外层逐行 OOF -> 内层时间 cross-fitting -> 路由/融合/协调 -> 全量重训与因果滚动推理。
 
 ## 当前范围
 
 - 初赛短周期：每个 15 分钟滚动起点，直接预测未来 15 至 120 分钟共 8 步。
-- 目标：`generator_1` 与 `generator_all`。
+- 官方目标：`generator_1` 与 `generator_all`；结构分支额外预测 `generator_rest`。
 - 交付：数据审计、滚动验证、训练、因果滚动推理、宽表结果和提交压缩包。
 - 原始赛事数据、测试数据、模型产物和提交结果均被 Git 忽略，不上传公共仓库。
 
@@ -57,29 +57,42 @@ python scripts/audit_data.py --data-dir "data/raw/official/初赛-参赛者使�
 
 ## 训练、预测与提交
 
-正式自动编排入口会依次执行训练/测试数据审计、四版本15折以上滚动验证、未来扰动测试、规则选型、全量重训、逐时刻预测、结果校验和确定性ZIP打包：
+正式自动编排入口默认按 pooled OOF 直接比较单模型、目标路由与稳定目标×步长路由。每次运行创建独立目录，逐折 checkpoint 可恢复：
 
 ```powershell
 python scripts/auto_pipeline.py `
   --train-dir "data/raw/official/初赛-参赛者使用" `
   --test-dir "data/raw/scoring/初赛-评分所用测试集" `
-  --jobs 4
+  --jobs 8
 ```
 
-默认比较`v1`、`v2`、`v25`和`v3`，每个版本必须生成至少15个非重叠滚动折。选择规则固定为平均MAPE更低、多数折获胜、盲折不退化、最差折退化不超过0.3个百分点、两个目标均不持续变差；未来扰动测试失败时流水线立即停止。自动流程不读取测试期未来标签，不接收排行榜反馈，也不进行测试预测值人工修正。
+默认比较 `v1`、`v2`、`v25`、`v3`、V2/V3 目标路由及带三级回缩的目标×步长 LOFO 路由。主指标为逐单元格 pooled `competition_mape`；同时报告等目标、等目标×步长和旧折均值。旧逐级选择器仍可通过 `--selection-policy legacy` 使用。
+
+分阶段实验入口：
+
+```powershell
+python scripts/prepare_data.py --data-dir "data/raw/official/初赛-参赛者使用"
+python scripts/build_oof.py --data-dir "data/raw/official/初赛-参赛者使用" --jobs 8
+python scripts/compare_candidates.py --input <run-dir>/oof.csv
+python scripts/run_experiment.py --data-dir "data/raw/official/初赛-参赛者使用" --experiment-id m2 --jobs 8
+python scripts/audit_leakage.py --data-dir "data/raw/official/初赛-参赛者使用" --model <model> --jobs 8
+```
+
+所有命令默认写入 `results/raw/runs/<类型_时间戳_进程号>/`。运行目录包含逐行 OOF、报告、manifest、折级 checkpoint、模型或提交产物；指定同一 `--run-dir` 可从已完成折继续。
 
 自动调参不属于正式默认入口。需要开展参数搜索时，应使用独立训练期实验目录、同一套滚动折和有限候选集合，完成后再把冻结配置交给本入口验收。
 
 也可以分步执行已有命令：
 
 ```powershell
-# 先用训练期滚动报告选择版本；当前真实盲折默认选择 V2
-python scripts/train.py --data-dir "data/raw/official/初赛-参赛者使用" --version v2 --output artifacts/model.joblib
+# 使用冻结路由训练多模型包装器
+python scripts/train.py --data-dir "data/raw/official/初赛-参赛者使用" --version routed --selection <comparison-report>
 
+# 使用上一条命令输出的实际模型路径
 python scripts/predict.py `
   --train-dir "data/raw/official/初赛-参赛者使用" `
   --test-dir "data/raw/scoring/初赛-评分所用测试集" `
-  --model artifacts/model.joblib `
+  --model <train_run>/model.joblib `
   --output-dir submissions/final
 
 python scripts/validate_submission.py --input submissions/final/s_result.csv
@@ -91,10 +104,12 @@ python scripts/package_submission.py `
 完整 20 折验证与冻结：
 
 ```powershell
-python scripts/backtest.py --data-dir "data/raw/official/初赛-参赛者使用" --version v1 --jobs 4 --output results/raw/backtest_v1_20fold.json
-python scripts/backtest.py --data-dir "data/raw/official/初赛-参赛者使用" --version v2 --jobs 4 --output results/raw/backtest_v2_20fold.json
-python scripts/select_model.py --data-dir "data/raw/official/初赛-参赛者使用" --v1 results/raw/backtest_v1_20fold.json --v2 results/raw/backtest_v2_20fold.json --output results/raw/model_selection_20fold.json
+python scripts/backtest.py --data-dir "data/raw/official/初赛-参赛者使用" --version v1 --jobs 4
+python scripts/backtest.py --data-dir "data/raw/official/初赛-参赛者使用" --version v2 --jobs 4
+python scripts/select_model.py --data-dir "data/raw/official/初赛-参赛者使用" --v1 <v1_run>/report.json --v2 <v2_run>/report.json
 ```
+
+所有实验入口默认在 `results/raw/runs/` 下新建带任务名、毫秒时间戳和进程号的独立目录。目录内保存该次报告、预测、模型、日志和 checkpoint；只有恢复同一次中断运行时才显式传入原 `--run-dir`。
 
 若平台仍要求数据字典中的旧版 JSON，可单独执行：
 

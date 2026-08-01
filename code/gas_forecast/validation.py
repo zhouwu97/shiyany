@@ -11,6 +11,7 @@ from joblib import Parallel, delayed
 from gas_forecast.config import ForecastConfig
 from gas_forecast.model_ensemble import GasAwareEnsembleForecaster
 from gas_forecast.model_v1 import RidgeDeltaForecaster
+from gas_forecast.scoring import competition_mape
 from gas_forecast.targets import build_delta_targets
 
 
@@ -54,8 +55,9 @@ def make_rolling_folds(index: pd.DatetimeIndex, config: ForecastConfig) -> list[
 
 
 def mape(actual: np.ndarray, predicted: np.ndarray) -> float:
-    denominator = np.maximum(np.abs(actual), 1e-6)
-    return float(np.mean(np.abs(actual - predicted) / denominator))
+    """旧公开 API，内部统一转发到 competition_mape。"""
+
+    return competition_mape(actual, predicted)
 
 
 def backtest_model(

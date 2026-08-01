@@ -9,6 +9,7 @@ from pathlib import Path
 from gas_forecast.config import ForecastConfig
 from gas_forecast.data import align_tables
 from gas_forecast.features import build_causal_features, load_price_schedule
+from gas_forecast.experiments import new_run_dir
 from gas_forecast.orchestration import audit_future_perturbation
 from gas_forecast.selection import choose_version
 
@@ -20,8 +21,11 @@ def main() -> None:
     parser.add_argument("--v2", type=Path)
     parser.add_argument("--v25", type=Path)
     parser.add_argument("--v3", type=Path)
-    parser.add_argument("--output", type=Path, default=Path("results/raw/model_selection.json"))
+    parser.add_argument("--run-dir", type=Path)
+    parser.add_argument("--output", type=Path)
     args = parser.parse_args()
+    run_dir = args.run_dir or new_run_dir("results/raw/runs", "select_model")
+    output = args.output or run_dir / "decision.json"
 
     reports = {}
     for version in ("v1", "v2", "v25", "v3"):
@@ -46,8 +50,8 @@ def main() -> None:
     decision = choose_version(reports)
     decision["future_perturbation"] = perturbation
     decision["test_labels_used"] = False
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(decision, ensure_ascii=False, indent=2), encoding="utf-8")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(decision, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(decision, ensure_ascii=False, indent=2))
 
 
