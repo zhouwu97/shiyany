@@ -11,8 +11,8 @@ from gas_forecast.data import align_tables
 from gas_forecast.experiments import finalize_run, new_run_dir, write_json
 from gas_forecast.features import load_price_schedule
 from gas_forecast.research import (
-    ResearchCandidate,
     build_research_oof,
+    filter_research_candidate_names,
     make_online_combination_candidate,
     make_research_candidates,
 )
@@ -127,23 +127,6 @@ def _load_base_config(path: Path, candidate_name: str | None) -> ForecastConfig:
     return forecast_config_from_dict(raw)
 
 
-def _filter_candidate_names(
-    candidates: list[ResearchCandidate],
-    names: list[str] | None,
-) -> list[ResearchCandidate]:
-    """限制本轮候选集合，避免在 blind 阶段读取未冻结的参数结果。"""
-
-    if names is None:
-        return candidates
-    expected = set(names)
-    selected = [candidate for candidate in candidates if candidate.name in expected]
-    found = {candidate.name for candidate in selected}
-    missing = sorted(expected.difference(found))
-    if missing:
-        raise ValueError(f"实验中不存在指定候选: {missing}")
-    return selected
-
-
 def main() -> None:
     args = parse_args()
     if args.jobs < 1:
@@ -178,7 +161,7 @@ def main() -> None:
         ]
         existing = {candidate.name for candidate in candidates}
         candidates.extend(candidate for candidate in included if candidate.name not in existing)
-    candidates = _filter_candidate_names(candidates, args.only_candidate_name)
+    candidates = filter_research_candidate_names(candidates, args.only_candidate_name)
     baseline_name = args.baseline_name
     if args.baseline_experiment_id:
         baseline_candidates = make_research_candidates(args.baseline_experiment_id, config)

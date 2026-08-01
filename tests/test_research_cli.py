@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from gas_forecast.research import make_research_candidates
-from scripts.run_research_experiment import _filter_candidate_names
+from gas_forecast.research import filter_research_candidate_names, make_research_candidates
 
 
 def test_blind_candidate_filter_keeps_only_frozen_name() -> None:
@@ -11,8 +10,8 @@ def test_blind_candidate_filter_keeps_only_frozen_name() -> None:
 
     candidates = make_research_candidates("E21_gen1_recency_exp")
 
-    selected = _filter_candidate_names(candidates, ["e21_exp_half_life_30d"])
+    selected = filter_research_candidate_names(candidates, ["e21_exp_half_life_30d"])
 
     assert [candidate.name for candidate in selected] == ["e21_exp_half_life_30d"]
     with pytest.raises(ValueError, match="不存在指定候选"):
-        _filter_candidate_names(candidates, ["not_frozen"])
+        filter_research_candidate_names(candidates, ["not_frozen"])

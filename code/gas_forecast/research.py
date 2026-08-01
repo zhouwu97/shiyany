@@ -289,6 +289,23 @@ def make_research_candidates(
     raise ValueError(f"未知研究实验 ID: {experiment_id}")
 
 
+def filter_research_candidate_names(
+    candidates: list[ResearchCandidate],
+    names: list[str] | None,
+) -> list[ResearchCandidate]:
+    """按冻结名称限制候选，避免 blind 阶段读取未登记的参数。"""
+
+    if names is None:
+        return candidates
+    expected = set(names)
+    selected = [candidate for candidate in candidates if candidate.name in expected]
+    found = {candidate.name for candidate in selected}
+    missing = sorted(expected.difference(found))
+    if missing:
+        raise ValueError(f"实验中不存在指定候选: {missing}")
+    return selected
+
+
 def make_online_combination_candidate(
     config: ForecastConfig,
     modes: tuple[str, ...],
