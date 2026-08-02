@@ -84,3 +84,17 @@
 - E23b、E24、E26、E22、E50、E51 均在 screening 阶段按 pooled/目标/胜折门槛停止。E90–E92 共完成 20 个真实 hot-start 配置，最佳候选仍相对 C0 退化，全部停止，不做 development。
 - E25 k40/k80 虽通过 5 折 screening，但完整 development 分别退化 0.031618pp/0.021643pp，bootstrap 支持仅 6.30%/11.45%；拒绝 blind、E25b 和专家路由，避免把筛选噪声带入正式训练。
 - Production Gate 通过 250 个未来扰动案例、83 项测试和提交 ZIP 校验；`production_gate_passed=true`，严格 C0 已覆盖 `results/best/`。正式提交只保留 `result.csv`，没有读取测试未来标签或排行榜反馈。
+
+## 2026-08-02 初赛提交格式纠正
+
+- 以已成功上传的初赛 ZIP 为准，正式压缩包根目录固定为 `input.csv` 和 `s_result.csv`，不再使用只含 `result.csv` 的旧约定。
+- `input.csv` 必须来自同一冻结模型的实际滚动推理特征，并与 `s_result.csv` 的 192 个时间戳逐行一致；格式纠正不重训、不改预测值，也不使用测试未来标签。
+
+## 2026-08-02 Strict C0 后冲分计划最终决策
+
+- A2.1 双向 split-half Oracle gap 为 `-0.003840pp`，判为 C；因此 S1-S3 只做实现验收，正式 stacking 仅保留 `S00_global` 弱信号（`SCREEN`）。
+- E21 只比较 R75/R90/R105；R75 相对同口径 C0 改善 `0.006248pp`，10/19 折获胜、最近 5 折赢 3，按冻结规则晋级为临时基线。
+- Price Ridge 相对 R75 退化 `0.034672pp`；Huber 存在未收敛折并被标为无效；Physical X1 的首个 5% blend 退化 `0.166554pp`。两条路线均 `STOP`，禁止继续调参。
+- 统一 Diversity 的 `R75 + 20% lgb_residual` 经生产容量投影后，development MAPE 为 `5.229437%`，相对同口径 C0 改善 `0.030575pp`，14/19 折获胜、最近 5 折赢 4；冻结后唯一一次 blind 确认改善 `0.040860pp`，状态为 `PROMOTE`。
+- 新候选通过 50 起点×5 扰动、92 项 pytest、提交校验和确定性 ZIP；`production_gate_passed=true`。正式 best 更新为 `aggressive_r75_lgb20`，不再启动第二梯队的大规模 OOF 消耗。
+- 成功 ZIP 样板与正式 ZIP 均通过同一契约：根目录 `input.csv`、`s_result.csv`，UTF-8，192 个一致时间戳，结果 16 个预测列。样板特征属于旧模型，不能复制替换当前模型 input。

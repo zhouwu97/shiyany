@@ -288,3 +288,21 @@ C0 OOF、选择、逐折 checkpoint 和收据位于 `results/raw/runs/oof/clean_
 - `production_gate_passed=true`，已自动晋级 `results/best/`。
 
 当前正式提交仍由严格 C0 路由产生，不包含任何研究候选或测试标签反馈。
+
+## 2026-08-02 初赛提交格式纠正
+
+依据已成功提交的初赛样例，ZIP 契约纠正为根目录依次包含 `input.csv` 与 `s_result.csv`。其中 `input.csv` 是冻结模型在 192 个滚动起点实际使用的因果特征，`s_result.csv` 是原 192×16 预测宽表；模型、预测数值和离线成绩不变。旧的“ZIP 仅含 `result.csv`”约定停止使用。
+
+## 2026-08-02 Strict C0 后完整冲分计划结果
+
+| 路线 | development MAPE | 相对父基线 | 胜折 / 最近 5 折 | 决策 |
+| --- | ---: | ---: | ---: | --- |
+| S00 global stacking | 5.257643% | -0.002370pp vs C0 | 10/19，4/5 | SCREEN |
+| E21 R75 | 5.253764% | -0.006248pp vs C0 | 10/19，3/5 | PROMOTE 临时基线 |
+| Price Ridge | 5.288436% | +0.034672pp vs R75 | 9/19，4/5 | STOP |
+| Physical X1 5% | 5.420318% | +0.166554pp vs R75 | 4/19，2/5 | STOP |
+| **R75 + LGB residual 20% + capacity projection** | **5.229437%** | **-0.030575pp vs C0** | **14/19，4/5** | **PROMOTE** |
+
+最终候选只修改 `generator_1`：t+75 至 t+120 以 E21 作为 R75 基线，其他步长保留 Strict C0，然后统一融入 20% 的冻结 V2 LGB residual 分支；`generator_all` 保持 C0，并执行与生产推理相同的 `0 <= generator_1 <= 200`、`generator_1 <= generator_all <= min(440, generator_1 + 240)` 投影。投影影响 605 个 OOF 单元，但指标没有反转。
+
+冻结后只查看一次 blind，改善 `0.040860pp`。正式运行位于 `results/raw/runs/training/aggressive_r75_lgb20_20260802/`；Production Gate 通过 250/250 个未来扰动案例、92 项测试、192×16 提交校验和确定性 ZIP。全 OOF（含 blind）门禁口径为 `5.266622%`，优于原 Strict C0 的 `5.297932%`，现已晋级 `results/best/`。

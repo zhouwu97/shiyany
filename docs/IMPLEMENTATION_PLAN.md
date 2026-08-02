@@ -1,5 +1,7 @@
 # 完整实施计划
 
+> 范围：只实现初赛。复赛、决赛、发电优化调度及其他赛段暂不实现。
+
 > 2026-07-31 修订：下列旧 P0-P4 记录作为历史保留；正式执行顺序已切换为 M1-M4，`selection.py` 旧策略由 `selection_legacy.py` 保底，不再作为默认竞赛策略。
 
 ## 当前 M1-M4 执行蓝图
@@ -11,7 +13,7 @@
 | M3 结构信息 | `generator_rest`、direct/bottom-up、固定融合、对角方差协调、raw-clean-flag 异常双通道 | 至少一个结构候选在完整 OOF 稳定提升 |
 | M4 候选增强 | CatBoost、变化点近期窗口、未来煤气轨迹 OOF 两阶段、低容量动态门控 | 只作为独立 OOF 分支，不默认替换主模型 |
 
-所有实验入口默认按 `results/raw/runs/{oof,comparisons,training,experiments,audits}/<运行时间>/` 分类写入独立目录；报告、预测、模型、日志和逐折 checkpoint 不跨运行混放。`results/latest/` 保存各类最近运行指针，`results/best/` 只保存满足完整运行、泄漏、测试和提交校验的当前最优模型。最终上传入口固定为 `提交这个/teamname_gas_predict_prelim.zip`。只有恢复同一次中断运行时才允许显式复用 `--run-dir`。评分名称为 `competition_mape`，显式登记 epsilon、聚合和缺失策略；官方零值细则未确认前不使用 `official_mape` 名称。目标×步长路由按“单元→目标→全局”三级回缩。MinTrace 仅在对角协调已稳定提升且误差协方差样本充分后启用。
+所有实验入口默认按 `results/raw/runs/{oof,comparisons,training,experiments,audits}/<运行时间>/` 分类写入独立目录；报告、预测、模型、日志和逐折 checkpoint 不跨运行混放。`results/latest/` 保存各类最近运行指针，`results/best/` 只保存满足完整运行、泄漏、测试和提交校验的当前最优模型。最终上传入口固定为 `提交这个/咕咕嘎嘎_gas_predict_prelim.zip`，ZIP 根目录包含 `input.csv` 和 `s_result.csv`。只有恢复同一次中断运行时才允许显式复用 `--run-dir`。评分名称为 `competition_mape`，显式登记 epsilon、聚合和缺失策略；官方零值细则未确认前不使用 `official_mape` 名称。目标×步长路由按“单元→目标→全局”三级回缩。MinTrace 仅在对角协调已稳定提升且误差协方差样本充分后启用。
 
 截至 2026-08-01 的 M1-M4 历史收尾结论保留：M1 已冻结，M2/M3 完整 OOF 和 M4 smoke 未超过当时 M1。随后按用户确认的受控扩展计划完成严格 C0 重建、E23/E23b/E24/E25/E26、E90-E92、E50/E51 与正式 Production Gate；当前状态以本文末的执行记录为准。
 
@@ -30,10 +32,12 @@
 - 严格 C0：20 折、62,858 个评分单元、135 分钟 purge，pooled MAPE **5.297932%**，blind 5.790875%。
 - E23b、E24、E26、E22、E50、E51 未通过 screening；E90-E92 未通过 screening；E25 k40/k80 未通过完整 development。所有停止均保留独立 run、checkpoint、report 和 receipt。
 - C0 正式训练目录为 `results/raw/runs/training/c0_formal_20260801/`；Production Gate 通过 250 个未来扰动案例、83 项 pytest 和 ZIP 校验，已晋级 `results/best/`。
+- Strict C0 后冲分计划最终冻结 `aggressive_r75_lgb20`：development 经生产容量投影后 MAPE **5.229437%**，14/19 折获胜、最近 5 折赢 4；唯一一次 blind 确认为正向。
+- 新候选的 250 个未来扰动、92 项 pytest、提交校验和确定性 ZIP 全部通过，现为 `results/best/` 正式模型。第二梯队固定实现保留，但按资源停止规则不再启动大规模 OOF。
 
 ### 不可突破的发布门槛
 
-研究候选不得因单个 screening 折、单个 blind 折或局部目标改善而晋级；必须完成同口径 development、必要时 final blind、模型级泄漏审计、完整测试和提交校验。当前正式入口继续使用 C0 routed champion，研究分支只作为可追溯实验资产保留。
+研究候选不得因单个 screening 折、单个 blind 折或局部目标改善而晋级；必须完成同口径 development、必要时 final blind、模型级泄漏审计、完整测试和提交校验。当前正式入口使用已通过全部门禁的 `aggressive_r75_lgb20`；其他研究分支只作为可追溯实验资产保留。
 
 ## 1. 目标与不可突破的边界
 
@@ -113,4 +117,4 @@ python scripts/auto_pipeline.py `
   --jobs 4
 ```
 
-自动入口默认比较V1、V2、V2.5和V3，每个版本至少需要15个滚动折，并硬性校验192行、16个预测字段及ZIP内唯一的`result.csv`。选型只依据训练期滚动验证，绝不读取测试期未来真实值；高阶版本未通过逐级门槛时回退到已经通过的最高版本。
+自动入口默认比较V1、V2、V2.5和V3，每个版本至少需要15个滚动折，并硬性校验192行、16个预测字段、输入与结果时间戳一致，以及ZIP根目录仅含`input.csv`和`s_result.csv`。选型只依据训练期滚动验证，绝不读取测试期未来真实值；高阶版本未通过逐级门槛时回退到已经通过的最高版本。

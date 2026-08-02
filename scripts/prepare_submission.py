@@ -8,7 +8,6 @@ import json
 import os
 import shutil
 import subprocess
-import zipfile
 from pathlib import Path
 
 import pandas as pd
@@ -19,7 +18,13 @@ from gas_forecast.experiments import (
     promote_if_best,
     write_json,
 )
-from gas_forecast.submission import validate_submission_frame
+from gas_forecast.submission import (
+    SUBMISSION_MEMBERS,
+    package_submission,
+    validate_submission_archive,
+    validate_submission_frame,
+    validate_submission_input,
+)
 
 
 def sha256(path: Path) -> str:
@@ -60,6 +65,7 @@ def bootstrap_best(
     if not promotion_evidence_passes(source_run, source_manifest):
         raise SystemExit("source run 的验证收据内容与 manifest 不一致")
     model = _find_source_file(source_run, ("model.joblib", "model/model.joblib"))
+    input_file = _find_source_file(source_run, ("input.csv", "submission/input.csv"))
     result = _find_source_file(
         source_run, ("result.csv", "s_result.csv", "submission/s_result.csv", "submission/result.csv")
     )
@@ -70,6 +76,7 @@ def bootstrap_best(
         shutil.rmtree(candidate_dir)
     candidate_dir.mkdir(parents=True, exist_ok=False)
     shutil.copy2(model, candidate_dir / "model.joblib")
+    shutil.copy2(input_file, candidate_dir / "input.csv")
     shutil.copy2(result, candidate_dir / "result.csv")
     shutil.copy2(archive, candidate_dir / "submission.zip")
     manifest = dict(source_manifest)
@@ -79,6 +86,7 @@ def bootstrap_best(
             "source_run": str(source_run.resolve()),
             "best_files": {
                 "model": "model.joblib",
+                "input": "input.csv",
                 "result": "result.csv",
                 "submission": "submission.zip",
                 "report": "report.json",
@@ -106,20 +114,38 @@ def bootstrap_best(
             shutil.copy2(report, best_dir / "report.json")
         if selection and selection.exists():
             shutil.copy2(selection, best_dir / "selection.json")
-        manifest["source_run"] = str(source_run.resolve())
-        manifest["submission_path"] = "submission.zip"
-        write_json(best_dir / "manifest.json", manifest)
-        write_json(best_dir / "summary.json", manifest)
-        write_json(Path("results/latest/training.json"), manifest)
+        promoted_manifest = json.loads(
+            (best_dir / "manifest.json").read_text(encoding="utf-8")
+        )
+        promoted_manifest.update(
+            {
+                "run_id": "best",
+                "source_run": str(source_run.resolve()),
+                "submission_path": "submission.zip",
+            }
+        )
+        write_json(best_dir / "manifest.json", promoted_manifest)
+        write_json(best_dir / "summary.json", promoted_manifest)
+        write_json(Path("results/latest/training.json"), promoted_manifest)
+    else:
+        # 上一版本可能已完成原子替换，但被中间 manifest 的 evidence 名称覆盖。
+        current_path = best_dir / "manifest.json"
+        if current_path.exists():
+            current = json.loads(current_path.read_text(encoding="utf-8"))
+            same_source = current.get("source_run") == str(source_run.resolve())
+            standard_evidence = {
+                "oof_report": "oof_report.json",
+                "leakage_report": "leakage.json",
+                "pytest_report": "pytest.json",
+                "submission_report": "submission.json",
+            }
+            repaired = dict(current)
+            repaired["promotion_evidence"] = standard_evidence
+            if same_source and promotion_evidence_passes(best_dir, repaired):
+                write_json(best_dir / "manifest.json", repaired)
+                write_json(best_dir / "summary.json", repaired)
     shutil.rmtree(candidate_dir)
     return promoted
-
-
-def verify_zip(archive: Path) -> None:
-    with zipfile.ZipFile(archive) as handle:
-        names = handle.namelist()
-    if names != ["result.csv"]:
-        raise RuntimeError(f"提交 ZIP 必须只包含 result.csv，实际为: {names}")
 
 
 def main() -> None:
@@ -129,6 +155,12 @@ def main() -> None:
     parser.add_argument("--source-run", type=Path)
     parser.add_argument("--report", type=Path)
     parser.add_argument("--selection", type=Path)
+    parser.add_argument(
+        "--input-file",
+        type=Path,
+        help="仅用于给旧 best 补充由同一冻结模型生成的 input.csv",
+    )
+    parser.add_argument("--team-name", default="咕咕嘎嘎")
     parser.add_argument("--no-open", action="store_true")
     args = parser.parse_args()
     if args.source_run:
@@ -147,19 +179,62 @@ def main() -> None:
     if not promotion_evidence_passes(args.best_dir, manifest):
         raise SystemExit("当前 best 的验证收据内容未通过机械复核")
     archive = args.best_dir / "submission.zip"
+    input_file = args.best_dir / "input.csv"
     result = args.best_dir / "result.csv"
-    if not archive.exists() or not result.exists():
-        raise SystemExit("best 缺少 submission.zip 或 result.csv")
-    verify_zip(archive)
-    validation = validate_submission_frame(pd.read_csv(result))
+    if not result.exists():
+        raise SystemExit("best 缺少 result.csv")
+    result_frame = pd.read_csv(result)
+    validation = validate_submission_frame(result_frame)
+    if args.input_file:
+        source_input = pd.read_csv(args.input_file)
+        validate_submission_input(source_input, result_frame)
+        shutil.copy2(args.input_file, input_file)
+    if not input_file.exists():
+        raise SystemExit("best 缺少 input.csv；请用 --input-file 提供同一冻结模型的推理输入")
+    input_validation = validate_submission_input(pd.read_csv(input_file), result_frame)
     if int(validation["rows"]) != 192 or int(validation["prediction_columns"]) != 16:
         raise SystemExit(f"提交结果尺寸不符合要求: {validation}")
+    package_submission(input_file, result, archive)
+    archive_validation = validate_submission_archive(
+        archive,
+        expected_input_path=input_file,
+        expected_result_path=result,
+    )
+    if any(character in args.team_name for character in '<>:"/\\|?*') or not args.team_name.strip():
+        raise SystemExit("队伍名称为空或含 Windows 文件名非法字符")
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    target_archive = args.output_dir / "teamname_gas_predict_prelim.zip"
-    target_result = args.output_dir / "result.csv"
+    target_archive = args.output_dir / f"{args.team_name}_gas_predict_prelim.zip"
+    target_input = args.output_dir / "input.csv"
+    target_result = args.output_dir / "s_result.csv"
     shutil.copy2(archive, target_archive)
+    shutil.copy2(input_file, target_input)
     shutil.copy2(result, target_result)
     pooled = float(manifest["pooled_mape"])
+    hashes = manifest.get("hashes", {})
+    if not isinstance(hashes, dict):
+        hashes = {}
+    hashes.update(
+        {
+            "input": sha256(input_file),
+            "result": sha256(result),
+            "submission": sha256(archive),
+        }
+    )
+    manifest["hashes"] = hashes
+    best_files = manifest.get("best_files", {})
+    if not isinstance(best_files, dict):
+        best_files = {}
+    best_files.update({"input": "input.csv", "result": "result.csv", "submission": "submission.zip"})
+    manifest["best_files"] = best_files
+    submission_receipt = {
+        "valid": True,
+        "validation": validation,
+        "input": input_validation,
+        "archive": archive_validation,
+    }
+    write_json(args.best_dir / "submission.json", submission_receipt)
+    write_json(args.best_dir / "manifest.json", manifest)
+    write_json(args.best_dir / "summary.json", manifest)
     summary = {
         "candidate": manifest.get("candidate", "unknown"),
         "pooled_mape": pooled,
@@ -167,7 +242,8 @@ def main() -> None:
         "source_run": manifest.get("source_run", "unknown"),
         "submission": str(target_archive.resolve()),
         "sha256": sha256(target_archive),
-        "zip_members": ["result.csv"],
+        "zip_members": list(SUBMISSION_MEMBERS),
+        "input_validation": input_validation,
         "validation": validation,
     }
     write_json(args.output_dir / "summary.json", summary)
@@ -178,9 +254,9 @@ def main() -> None:
         f"对应离线预测得分：{100 * (1 - pooled):.4f}\n"
         f"来源运行：{summary['source_run']}\n\n"
         "请上传：\n"
-        "teamname_gas_predict_prelim.zip\n\n"
+        f"{target_archive.name}\n\n"
         "不要上传：\n"
-        "result.csv\nmodel.joblib\ninput.csv\nresults/raw/runs 下的任何实验目录\n"
+        "单独的 input.csv 或 s_result.csv\nmodel.joblib\nresults/raw/runs 下的任何实验目录\n"
     )
     (args.output_dir / "提交说明.txt").write_text(explanation, encoding="utf-8")
     if not args.no_open and os.name == "nt":

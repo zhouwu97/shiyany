@@ -12,6 +12,8 @@ import pandas as pd
 
 from gas_forecast.config import ForecastConfig
 
+SUBMISSION_MEMBERS = ["input.csv", "s_result.csv"]
+
 
 def expected_prediction_columns(config: ForecastConfig | None = None) -> list[str]:
     config = config or ForecastConfig()
@@ -67,29 +69,148 @@ def validate_submission_frame(
     }
 
 
+def validate_submission_input(
+    input_frame: pd.DataFrame,
+    result_frame: pd.DataFrame,
+) -> dict[str, object]:
+    """校验提交输入特征，并确认它与预测结果逐行对应。"""
+
+    if input_frame.empty:
+        raise ValueError("input.csv 为空")
+    if input_frame.columns[0] != "datetime":
+        raise ValueError("input.csv 第一列必须为 datetime")
+    if input_frame.columns.duplicated().any():
+        raise ValueError("input.csv 含重复字段")
+
+    timestamps = pd.to_datetime(input_frame["datetime"], errors="coerce")
+    result_timestamps = pd.to_datetime(result_frame["datetime"], errors="coerce")
+    if timestamps.isna().any():
+        raise ValueError("input.csv 的 datetime 含非法时间戳")
+    if timestamps.duplicated().any() or not timestamps.is_monotonic_increasing:
+        raise ValueError("input.csv 的 datetime 必须唯一且严格递增")
+    if len(input_frame) != len(result_frame) or not timestamps.reset_index(drop=True).equals(
+        result_timestamps.reset_index(drop=True)
+    ):
+        raise ValueError("input.csv 与 s_result.csv 的行数或时间戳不一致")
+
+    features = input_frame.iloc[:, 1:].apply(pd.to_numeric, errors="coerce")
+    if features.empty:
+        raise ValueError("input.csv 不含模型输入字段")
+    if features.isna().any().any() or not np.isfinite(features.to_numpy()).all():
+        raise ValueError("input.csv 的模型输入字段含缺失值、非数值或非有限值")
+
+    return {
+        "rows": len(input_frame),
+        "input_columns": len(features.columns),
+        "start": str(timestamps.iloc[0]),
+        "end": str(timestamps.iloc[-1]),
+    }
+
+
+def _zip_info(name: str) -> zipfile.ZipInfo:
+    info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+    info.compress_type = zipfile.ZIP_DEFLATED
+    info.create_system = 3
+    info.external_attr = 0o100644 << 16
+    return info
+
+
+def validate_submission_archive(
+    archive_path: str | Path,
+    *,
+    expected_input_path: str | Path | None = None,
+    expected_result_path: str | Path | None = None,
+) -> dict[str, object]:
+    """校验 ZIP 成员、内部 CSV，以及可选的磁盘源文件一致性。"""
+
+    with zipfile.ZipFile(archive_path) as archive:
+        names = archive.namelist()
+        if names != SUBMISSION_MEMBERS:
+            raise ValueError(f"提交 ZIP 必须依次包含 {SUBMISSION_MEMBERS}，实际为: {names}")
+        archived_input = pd.read_csv(io.BytesIO(archive.read("input.csv")))
+        archived_result = pd.read_csv(io.BytesIO(archive.read("s_result.csv")))
+
+    result_summary = validate_submission_frame(archived_result)
+    input_summary = validate_submission_input(archived_input, archived_result)
+    if expected_input_path is not None:
+        expected_input = pd.read_csv(expected_input_path)
+        validate_submission_input(expected_input, archived_result)
+        if list(expected_input.columns) != list(archived_input.columns):
+            raise ValueError("磁盘 input.csv 与 ZIP 内 input.csv 字段不一致")
+        np.testing.assert_allclose(
+            expected_input.iloc[:, 1:].to_numpy(float),
+            archived_input.iloc[:, 1:].to_numpy(float),
+            rtol=0.0,
+            atol=5e-10,
+        )
+    if expected_result_path is not None:
+        expected_result = pd.read_csv(expected_result_path)
+        validate_submission_frame(expected_result)
+        if list(expected_result.columns) != list(archived_result.columns):
+            raise ValueError("磁盘 s_result.csv 与 ZIP 内 s_result.csv 字段不一致")
+        if not pd.to_datetime(expected_result["datetime"]).equals(
+            pd.to_datetime(archived_result["datetime"])
+        ):
+            raise ValueError("磁盘 s_result.csv 与 ZIP 内 s_result.csv 时间戳不一致")
+        np.testing.assert_allclose(
+            expected_result.iloc[:, 1:].to_numpy(float),
+            archived_result.iloc[:, 1:].to_numpy(float),
+            rtol=0.0,
+            atol=5e-7,
+        )
+    return {
+        "valid": True,
+        "members": list(SUBMISSION_MEMBERS),
+        "validation": result_summary,
+        "input": input_summary,
+    }
+
+
 def package_submission(
+    input_path: str | Path,
     result_path: str | Path,
     output_zip: str | Path,
 ) -> dict[str, object]:
-    frame = pd.read_csv(result_path)
-    summary = validate_submission_frame(frame)
-    buffer = io.StringIO()
-    frame.to_csv(buffer, index=False, float_format="%.6f", lineterminator="\n")
+    input_frame = pd.read_csv(input_path)
+    result_frame = pd.read_csv(result_path)
+    result_summary = validate_submission_frame(result_frame)
+    input_summary = validate_submission_input(input_frame, result_frame)
+    input_buffer = io.StringIO()
+    result_buffer = io.StringIO()
+    input_frame.to_csv(input_buffer, index=False, lineterminator="\n")
+    result_frame.to_csv(
+        result_buffer,
+        index=False,
+        float_format="%.6f",
+        lineterminator="\n",
+    )
     destination = Path(output_zip)
     destination.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        info = zipfile.ZipInfo("result.csv", date_time=(1980, 1, 1, 0, 0, 0))
-        info.compress_type = zipfile.ZIP_DEFLATED
-        info.create_system = 3
-        info.external_attr = 0o100644 << 16
         archive.writestr(
-            info,
-            buffer.getvalue().encode("utf-8"),
+            _zip_info("input.csv"),
+            input_buffer.getvalue().encode("utf-8"),
             compress_type=zipfile.ZIP_DEFLATED,
             compresslevel=9,
         )
-    summary["archive"] = str(destination)
-    return summary
+        archive.writestr(
+            _zip_info("s_result.csv"),
+            result_buffer.getvalue().encode("utf-8"),
+            compress_type=zipfile.ZIP_DEFLATED,
+            compresslevel=9,
+        )
+    archive_summary = validate_submission_archive(
+        destination,
+        expected_input_path=input_path,
+        expected_result_path=result_path,
+    )
+    return {
+        **result_summary,
+        **input_summary,
+        "prediction_columns": result_summary["prediction_columns"],
+        "archive_members": archive_summary["members"],
+        "archive": str(destination),
+    }
 
 
 def export_legacy_json(result_path: str | Path, output_path: str | Path) -> dict[str, object]:

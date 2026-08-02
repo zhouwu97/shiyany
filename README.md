@@ -4,12 +4,25 @@
 
 > 合规预处理 -> 共享外层逐行 OOF -> 内层时间 cross-fitting -> 路由/融合/协调 -> 全量重训与因果滚动推理。
 
+> **范围注意：本仓库只实现初赛内容。复赛、决赛、发电优化调度及其他赛段需求暂不实现，也不应复用初赛验证结果直接推断这些赛段的方案。**
+
 ## 当前范围
 
 - 初赛短周期：每个 15 分钟滚动起点，直接预测未来 15 至 120 分钟共 8 步。
 - 官方目标：`generator_1` 与 `generator_all`；结构分支额外预测 `generator_rest`。
 - 交付：数据审计、滚动验证、训练、因果滚动推理、宽表结果和提交压缩包。
 - 原始赛事数据、测试数据、模型产物和提交结果均被 Git 忽略，不上传公共仓库。
+
+## 当前正式结果
+
+Strict C0 冻结基线为 pooled MAPE `5.297932%`（含最终 blind 的全 OOF 口径）。冲分计划完成 Oracle、严格前向 stacking、E21 crossing、Price、Physical/X1 和 Diversity 后，冻结候选为 `R75 + 20% lgb_residual`：
+
+- development（不含 blind）经生产容量投影后 MAPE `5.229437%`，相对同口径 C0 改善 `0.030575pp`；
+- 19 个 development folds 中赢 14 个，最近 5 折赢 4 个；
+- 冻结后唯一一次 blind 确认改善 `0.040860pp`；
+- Production Gate 的 250 个未来扰动、92 项 pytest、192×16 提交校验和确定性 ZIP 全部通过。
+
+正式初赛提交为 `提交这个/咕咕嘎嘎_gas_predict_prelim.zip`，ZIP 根目录只包含 `input.csv` 与 `s_result.csv`。第二梯队 CatBoost/Recursive ARX 已实现固定规格，但因主线已得到强晋级结果而未启动大规模 OOF 训练；复赛、决赛和优化调度仍不实现。
 
 ## 环境
 
@@ -106,7 +119,7 @@ python scripts/show_best.py
 python scripts/prepare_submission.py
 ```
 
-第二条命令会校验 `results/best`、ZIP 内容和 192×16 预测，并打开 `提交这个/`。平台只上传 `提交这个/teamname_gas_predict_prelim.zip`。
+第二条命令会校验 `results/best`、输入特征、192×16 预测及 ZIP 内容，并打开 `提交这个/`。平台只上传 `提交这个/咕咕嘎嘎_gas_predict_prelim.zip`；ZIP 根目录固定包含 `input.csv` 和 `s_result.csv`。
 
 自动调参不属于正式默认入口。需要开展参数搜索时，应使用独立训练期实验目录、同一套滚动折和有限候选集合，完成后再把冻结配置交给本入口验收。
 
@@ -125,8 +138,9 @@ python scripts/predict.py `
 
 python scripts/validate_submission.py --input submissions/final/s_result.csv
 python scripts/package_submission.py `
-  --input submissions/final/s_result.csv `
-  --output submissions/teamname_gas_predict_prelim.zip
+  --input submissions/final/input.csv `
+  --result submissions/final/s_result.csv `
+  --output submissions/咕咕嘎嘎_gas_predict_prelim.zip
 ```
 
 完整 20 折验证与冻结：
@@ -137,7 +151,7 @@ python scripts/backtest.py --data-dir "data/raw/official/初赛-参赛者使用"
 python scripts/select_model.py --data-dir "data/raw/official/初赛-参赛者使用" --v1 <v1_run>/report.json --v2 <v2_run>/report.json
 ```
 
-正式模型只认 `results/best/`。运行 `python scripts/show_best.py` 查看当前最优版本，运行 `python scripts/prepare_submission.py` 生成唯一提交目录 `提交这个/`；上传其中唯一的 `teamname_gas_predict_prelim.zip`，不要从历史 run 目录自行挑选文件。
+正式模型只认 `results/best/`。运行 `python scripts/show_best.py` 查看当前最优版本，运行 `python scripts/prepare_submission.py` 生成唯一提交目录 `提交这个/`；上传其中的 `咕咕嘎嘎_gas_predict_prelim.zip`，不要从历史 run 目录自行挑选文件。
 
 若平台仍要求数据字典中的旧版 JSON，可单独执行：
 
@@ -145,7 +159,7 @@ python scripts/select_model.py --data-dir "data/raw/official/初赛-参赛者使
 python scripts/export_json.py --input submissions/final/s_result.csv --output submissions/final/result_legacy.json
 ```
 
-不要把 CSV 和 JSON 同时放进正式提交包；优先级为平台当前模板、最新官方答疑、PDF 提交规范、数据包旧说明。
+正式提交包只放 `input.csv` 和 `s_result.csv`，不要加入 JSON、模型或目录层级；该契约以已成功提交的初赛样例为准。
 
 ## 测试集隔离
 
@@ -154,3 +168,27 @@ python scripts/export_json.py --input submissions/final/s_result.csv --output su
 完整阶段、验收标准和分段提交设计见 [实施计划](docs/IMPLEMENTATION_PLAN.md)。实验结论与路线裁决分别记录在 [RESULTS_REPORT.md](RESULTS_REPORT.md) 和 [DECISIONS.md](DECISIONS.md)。
 
 PR #1 之后的 `generator_1` 专项 Ridge、时间漂移、价格、加权损失、受限树模型、真正 OOF hot start、状态专家和路径候选，统一通过[研究工作流](docs/RESEARCH_WORKFLOW.md)运行；该入口默认不触碰 blind，也不会自动覆盖 `results/best/`。
+
+## Strict C0 后的冲分主线
+
+该阶段已执行完成；以下入口用于复验 Strict C0（pooled MAPE `5.297932%`）之后的冻结实验。研究子命令不会覆盖 `results/best/`，blind 默认不参与选参：
+
+```powershell
+# Phase 0：冻结 Strict C0、五分支、折和指纹
+python scripts/run_aggressive_plan.py freeze `
+  --branches results/raw/runs/a2_calibration/<run-id>
+
+# Phase 1：双向 split-half Oracle 与 S0-S3 严格前向 stacking
+python scripts/run_aggressive_plan.py oracle
+python scripts/run_aggressive_plan.py stacking
+
+# Phase 2-5：输入均须是严格 OOF 长表
+python scripts/run_aggressive_plan.py e21 --input <e21-oof>
+python scripts/run_aggressive_plan.py price --input <price-feature-oof>
+python scripts/run_aggressive_plan.py physical --input <physical-feature-oof>
+python scripts/run_aggressive_plan.py diversity --input <candidate-oof> `
+  --baseline-column e21_R75_pred `
+  --challengers lgb_residual_pred ridge_pred x1_indirect_g1_pred
+```
+
+缓存统一写入 `results/research_v2/`，实验登记写入 `results/aggressive_registry.csv`。完整输入契约、停止规则和各阶段产物见[冲分执行说明](docs/AGGRESSIVE_PLAN.md)。Absolute CatBoost-MAPE 与 Recursive ARX 已实现为第二梯队代码，但只有 stacking、Price、Physical/X1 全部完成后才允许启用；不执行 Optuna 或大范围参数搜索。

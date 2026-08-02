@@ -405,6 +405,7 @@ def promote_if_best(run_dir: str | Path, best_dir: str | Path) -> bool:
     summary["source_run"] = str(run_path.resolve())
     file_map = {
         "model.joblib": files.get("model", "model.joblib"),
+        "input.csv": files.get("input", "input.csv"),
         "result.csv": files.get("result", "result.csv"),
         "submission.zip": files.get("submission", "submission.zip"),
         "report.json": files.get("report", "report.json"),

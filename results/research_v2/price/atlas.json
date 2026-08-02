@@ -1,0 +1,108 @@
+{
+  "scope": "development_only",
+  "rows": 58368,
+  "switch_coverage": 0.4583333333333333,
+  "mape_switch": 0.054705198291187876,
+  "mape_non_switch": 0.05081890454611252,
+  "bias_switch": 0.0004278646285900692,
+  "bias_before_switch": -0.0015939297331410373,
+  "bias_after_switch": 0.004103784133486678,
+  "by_switch_category": [
+    {
+      "switch_category": "immediate_switch",
+      "rows": 3648,
+      "mape": 0.0560554731088117,
+      "bias": 0.007355325702482531
+    },
+    {
+      "switch_category": "no_switch",
+      "rows": 31616,
+      "mape": 0.05081890454611253,
+      "bias": 0.002279964779845763
+    },
+    {
+      "switch_category": "switch_in_1_step",
+      "rows": 3648,
+      "mape": 0.05618761718260784,
+      "bias": 0.0046406352701030915
+    },
+    {
+      "switch_category": "switch_in_2_steps",
+      "rows": 3648,
+      "mape": 0.05527098203100203,
+      "bias": -0.004646001375146686
+    },
+    {
+      "switch_category": "switch_in_3_4_steps",
+      "rows": 6688,
+      "mape": 0.05458633681923949,
+      "bias": 0.0016709709457644354
+    },
+    {
+      "switch_category": "switch_in_5_8_steps",
+      "rows": 9120,
+      "mape": 0.05343297239107352,
+      "bias": -0.0029102929553386234
+    }
+  ],
+  "by_direction": [
+    {
+      "switch_direction": -1,
+      "rows": 14592,
+      "mape": 0.05076631203679107,
+      "bias": 0.007328405630096955
+    },
+    {
+      "switch_direction": 0,
+      "rows": 31616,
+      "mape": 0.05081890454611253,
+      "bias": 0.002279964779845763
+    },
+    {
+      "switch_direction": 1,
+      "rows": 12160,
+      "mape": 0.05943186179646404,
+      "bias": -0.007852784573218193
+    }
+  ],
+  "by_magnitude": [
+    {
+      "price_magnitude_quantile": "Q1",
+      "rows": 26752,
+      "mape": 0.054705198291187876,
+      "bias": 0.0004278646285900694
+    },
+    {
+      "price_magnitude_quantile": "no_switch",
+      "rows": 31616,
+      "mape": 0.05081890454611253,
+      "bias": 0.002279964779845763
+    }
+  ],
+  "by_horizon_relation": [
+    {
+      "horizon_switch_relation": "after_switch",
+      "rows": 12312,
+      "mape": 0.06704222264916858,
+      "bias": 0.0041037841334866775
+    },
+    {
+      "horizon_switch_relation": "at_switch",
+      "rows": 3344,
+      "mape": 0.053496880830991696,
+      "bias": -0.006397521348239682
+    },
+    {
+      "horizon_switch_relation": "before_switch",
+      "rows": 11096,
+      "mape": 0.04138032173129581,
+      "bias": -0.001593929733141037
+    },
+    {
+      "horizon_switch_relation": "no_switch",
+      "rows": 31616,
+      "mape": 0.05081890454611253,
+      "bias": 0.002279964779845763
+    }
+  ]
+}

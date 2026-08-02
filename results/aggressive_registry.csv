@@ -1,0 +1,6 @@
+experiment_id,parent,date,model,target_scope,horizon_scope,n_params,pooled_mape,delta_vs_c0,g1_mape,gall_mape,fold_wins,recent5_wins,max_fold_regression,blind_used,leakage_passed,status,next_action
+S00_global,Strict C0,2026-08-02T23:00:15.710769+08:00,persistence_centered_global_stacking,all,all,5,0.0525764264326707,-0.0023696079934638,0.0613860355223085,0.043766817343033,10,4,0.184358282468539,False,True,SCREEN,弱信号，仅保留代码和结果
+E21_R75,Strict C0,2026-08-02T23:00:17.907641+08:00,e21_recency_crossing,generator_1,75_120,1,0.0525376375624942,-0.0062484950111178,0.0613084577819554,0.043766817343033,10,3,0.0597990192666355,False,True,PROMOTE,达到 0.005pp 且时间稳定性通过
+PRICE_R75_RIDGE,E21_R75,2026-08-02T23:00:20.218203+08:00,price_ridge_residual,switch_within_120,all,3,0.0528843591467469,0.0346721584252738,,,9,4,0.215226870297081,False,True,STOP,完整开发改善不足 0.002pp
+PHYSICAL_X1_R75,E21_R75,2026-08-02T23:00:22.461259+08:00,physical_rest_x1_blend05,generator_1,all,1,0.054203176096793,0.166553853429882,,,4,2,1.17296708520356,False,True,STOP,完整开发改善不足 0.002pp
+DIVERSITY_R75_LGB20,E21_R75,2026-08-02T23:00:24.809440+08:00,r75_lgb_residual_fixed_blend,generator_1,all,1,0.0522943699877092,-0.03057525248961815,0.0608275763099967,0.0437611636654217,14,4,0.0983845297890879,True,True,PROMOTE,达到 0.005pp 且时间稳定性通过

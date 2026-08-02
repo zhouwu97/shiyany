@@ -22,7 +22,7 @@ def test_new_run_dir_uses_date_first_readable_name(tmp_path) -> None:
 def test_best_promotion_requires_complete_eligible_run(tmp_path) -> None:
     run = tmp_path / "results" / "raw" / "runs" / "training" / "run"
     run.mkdir(parents=True)
-    for name in ("model.joblib", "result.csv", "submission.zip"):
+    for name in ("model.joblib", "input.csv", "result.csv", "submission.zip"):
         (run / name).write_bytes(name.encode())
     for name, payload in (
         ("oof.json", {"pooled_mape": 0.05}),
@@ -43,6 +43,7 @@ def test_best_promotion_requires_complete_eligible_run(tmp_path) -> None:
             "submission_valid": True,
             "best_files": {
                 "model": "model.joblib",
+                "input": "input.csv",
                 "result": "result.csv",
                 "submission": "submission.zip",
             },
@@ -57,3 +58,4 @@ def test_best_promotion_requires_complete_eligible_run(tmp_path) -> None:
     assert is_eligible_for_best({"status": "completed", "is_smoke": True}) is False
     assert promote_if_best(run, tmp_path / "results" / "best") is True
     assert (tmp_path / "results" / "best" / "model.joblib").exists()
+    assert (tmp_path / "results" / "best" / "input.csv").exists()

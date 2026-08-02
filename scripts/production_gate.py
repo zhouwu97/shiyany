@@ -6,7 +6,6 @@ import argparse
 import json
 import subprocess
 import sys
-import zipfile
 from pathlib import Path
 
 import joblib
@@ -18,7 +17,12 @@ from gas_forecast.experiments import finalize_run, promote_if_best, sha256, writ
 from gas_forecast.features import build_causal_features, load_price_schedule
 from gas_forecast.leakage import audit_future_perturbations
 from gas_forecast.scoring import score_oof_long
-from gas_forecast.submission import validate_submission_frame
+from gas_forecast.submission import (
+    validate_submission_archive,
+    validate_submission_frame,
+    validate_submission_input,
+)
+from gas_forecast.workflow import resolve_prediction_feature_config
 
 
 def _resolve_data_dir(path: Path) -> Path:
@@ -52,10 +56,15 @@ def _run_pytest(repo_root: Path) -> dict[str, object]:
     }
 
 
-def _zip_receipt(path: Path) -> dict[str, object]:
-    with zipfile.ZipFile(path) as archive:
-        members = archive.namelist()
-    return {"valid": members == ["result.csv"], "members": members}
+def _zip_receipt(path: Path, input_path: Path, result_path: Path) -> dict[str, object]:
+    try:
+        return validate_submission_archive(
+            path,
+            expected_input_path=input_path,
+            expected_result_path=result_path,
+        )
+    except (OSError, ValueError, AssertionError) as exc:
+        return {"valid": False, "error": str(exc)}
 
 
 def main() -> None:
@@ -74,15 +83,18 @@ def main() -> None:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     candidate = str(manifest.get("candidate", "unknown"))
     model_path = run_dir / str(manifest.get("best_files", {}).get("model", "model.joblib"))
+    input_path = run_dir / str(
+        manifest.get("best_files", {}).get("input", "submission/input.csv")
+    )
     result_path = run_dir / str(
-        manifest.get("best_files", {}).get("result", "submission/result.csv")
+        manifest.get("best_files", {}).get("result", "submission/s_result.csv")
     )
     archive_path = run_dir / str(
         manifest.get("best_files", {}).get("submission", "submission.zip")
     )
     oof_path = run_dir / str(manifest.get("oof", "oof.csv"))
     report_path = run_dir / str(manifest.get("report", "report.json"))
-    for path in (model_path, result_path, archive_path, oof_path, report_path):
+    for path in (model_path, input_path, result_path, archive_path, oof_path, report_path):
         if not path.is_file():
             raise FileNotFoundError(f"Production Gate 缺少产物: {path}")
 
@@ -108,9 +120,10 @@ def main() -> None:
     dataset = align_tables(data_dir, config.feature.frequency)
     prices = sorted(data_dir.glob("*price*.xlsx"))
     price = load_price_schedule(prices[0]) if prices else None
+    feature_config = resolve_prediction_feature_config(model)
 
     def builder(frame: pd.DataFrame) -> pd.DataFrame:
-        return build_causal_features(frame, config.feature, price)
+        return build_causal_features(frame, feature_config, price)
 
     def predictor(features: pd.DataFrame, current: pd.DataFrame) -> pd.DataFrame:
         return model.predict(features, current.loc[:, list(config.targets)])
@@ -127,13 +140,21 @@ def main() -> None:
 
     pytest_receipt = _run_pytest(Path.cwd())
     write_json(run_dir / "pytest.json", pytest_receipt)
+    input_frame = pd.read_csv(input_path)
     submission_frame = pd.read_csv(result_path)
     validation = validate_submission_frame(submission_frame, config)
-    zip_receipt = _zip_receipt(archive_path)
-    submission_receipt = {"valid": True, "validation": validation, "archive": zip_receipt}
+    input_validation = validate_submission_input(input_frame, submission_frame)
+    zip_receipt = _zip_receipt(archive_path, input_path, result_path)
+    submission_receipt = {
+        "valid": bool(zip_receipt["valid"]),
+        "validation": validation,
+        "input": input_validation,
+        "archive": zip_receipt,
+    }
     write_json(run_dir / "submission.json", submission_receipt)
     hashes = {
         "model": sha256(model_path),
+        "input": sha256(input_path),
         "result": sha256(result_path),
         "submission": sha256(archive_path),
         "oof": sha256(oof_path),

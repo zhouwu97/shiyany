@@ -44,7 +44,7 @@ def main() -> None:
     result_frame = predictions.reset_index()
     result_frame.to_csv(result_path, index=False, encoding="utf-8")
     validation = validate_submission_frame(result_frame)
-    archive = package_submission(result_path, archive_path)
+    archive = package_submission(input_path, result_path, archive_path)
     legacy_json = export_legacy_json(result_path, output_dir / "result_legacy.json")
 
     payload = {

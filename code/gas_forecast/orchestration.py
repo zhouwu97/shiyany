@@ -201,7 +201,7 @@ def run_automated_pipeline(
         raise RuntimeError(
             f"提交结果应有{expected_rows}行，实际为{validation['rows']}行"
         )
-    archive = package_submission(result_path, archive_path)
+    archive = package_submission(input_path, result_path, archive_path)
 
     summary: dict[str, object] = {
         "run_dir": str(run_path),
@@ -352,7 +352,7 @@ def run_competition_pipeline(
     if int(validation["rows"]) != expected_rows:
         raise RuntimeError(f"提交结果应有 {expected_rows} 行，实际为 {validation['rows']} 行")
     archive_path = run_path / "submission.zip"
-    package_submission(result_path, archive_path)
+    package_submission(input_path, result_path, archive_path)
     summary = {
         "run_dir": str(run_path),
         "selected_candidate": selected,

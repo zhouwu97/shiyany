@@ -230,6 +230,7 @@ results/raw/*
 !results/raw/.gitkeep
 results/best/
 results/latest/
+results/research_v2/**/*.parquet
 提交这个/
 *.pdf
 *.zip

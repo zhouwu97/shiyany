@@ -91,7 +91,8 @@ def main() -> None:
     config = legacy_forecast_config()
     dataset = align_tables(train_dir, config.feature.frequency)
     model_path = args.run_dir / "model.joblib"
-    result_path = args.run_dir / "submission" / "result.csv"
+    input_path = args.run_dir / "submission" / "input.csv"
+    result_path = args.run_dir / "submission" / "s_result.csv"
     archive_path = args.run_dir / "submission.zip"
     args.run_dir.mkdir(parents=True, exist_ok=True)
     train_model(
@@ -102,12 +103,13 @@ def main() -> None:
         n_jobs=args.jobs,
         config=config,
     )
-    _, predictions = predict_rolling(train_dir, test_dir, model_path)
+    input_features, predictions = predict_rolling(train_dir, test_dir, model_path)
     result_frame = predictions.reset_index()
     result_path.parent.mkdir(parents=True, exist_ok=True)
+    input_features.reset_index().to_csv(input_path, index=False, encoding="utf-8")
     result_frame.to_csv(result_path, index=False, encoding="utf-8")
     validation = validate_submission_frame(result_frame, config)
-    package_submission(result_path, archive_path)
+    package_submission(input_path, result_path, archive_path)
     shutil.copy2(args.c0_run / "oof_with_routes.csv", args.run_dir / "oof.csv")
     shutil.copy2(args.c0_run / "report.json", args.run_dir / "report.json")
     shutil.copy2(args.c0_run / "selection.json", args.run_dir / "selection.json")
@@ -124,7 +126,8 @@ def main() -> None:
             "deployment_route": route_name,
             "model": "model.joblib",
             "oof": "oof.csv",
-            "result": "submission/result.csv",
+            "input": "submission/input.csv",
+            "result": "submission/s_result.csv",
             "submission": "submission.zip",
             "validation": validation,
             "c0_run": str(args.c0_run.resolve()),
@@ -143,7 +146,8 @@ def main() -> None:
             "config": asdict(config),
             "best_files": {
                 "model": "model.joblib",
-                "result": "submission/result.csv",
+                "input": "submission/input.csv",
+                "result": "submission/s_result.csv",
                 "submission": "submission.zip",
                 "report": "report.json",
                 "selection": "selection.json",
