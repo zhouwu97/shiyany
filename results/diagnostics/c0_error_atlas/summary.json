@@ -1,0 +1,39 @@
+{
+  "run_oof": "E:\\AI\\shiyan\\results\\raw\\runs\\oof\\clean_c0_strict_20260801_v2\\oof_with_routes.csv",
+  "d1_horizon_summary": [
+    {
+      "horizon": 90,
+      "V3_beats_V2": 7,
+      "total_folds": 20,
+      "V3_minus_V2_pp": 0.0062
+    },
+    {
+      "horizon": 105,
+      "V3_beats_V2": 9,
+      "total_folds": 20,
+      "V3_minus_V2_pp": 0.0127
+    },
+    {
+      "horizon": 120,
+      "V3_beats_V2": 8,
+      "total_folds": 20,
+      "V3_minus_V2_pp": 0.0164
+    }
+  ],
+  "d1_gate_pass": false,
+  "d1_verdict": "V3_long_horizon_NOT_confirmed_stop_route",
+  "d3_stats": {
+    "n_switch_fix": 17680,
+    "n_switch_bug": 15671,
+    "immediate_switch_missed": 2009,
+    "step_wrong": 433,
+    "n_diverge": 2442
+  },
+  "d3_verdict": "price_fix_worthwhile",
+  "next_action": "stop_V3_long_route_investigate_P1_price_only",
+  "integrity": {
+    "test_labels_used": false,
+    "leaderboard_feedback_used": false,
+    "manual_prediction_edits": false
+  }
+}
