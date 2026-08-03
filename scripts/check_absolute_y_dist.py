@@ -10,11 +10,9 @@ import argparse
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 
 from gas_forecast.config import ForecastConfig
 from gas_forecast.data import align_tables
-from gas_forecast.features import build_causal_features, load_price_schedule
 from gas_forecast.splits import make_outer_folds
 from gas_forecast.targets import build_delta_targets, target_columns
 
@@ -62,9 +60,6 @@ def main() -> None:
     args = parse_args()
     config = ForecastConfig()
     dataset = align_tables(args.data_dir, config.feature.frequency)
-    prices = sorted(args.data_dir.glob("*price*.xlsx"))
-    price = load_price_schedule(prices[0]) if prices else None
-    features = build_causal_features(dataset.frame, config.feature, price)
 
     target = "generator_1"
     horizons = config.feature.horizons

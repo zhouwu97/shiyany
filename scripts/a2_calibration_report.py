@@ -54,7 +54,7 @@ def main() -> None:
 
     out: list[str] = []
     out.append("# A2 — simplex calibration stability audit (generator_1 / v2)\n")
-    out.append(f"Rule: conclusions from development folds only; blind observed only.\n")
+    out.append("Rule: conclusions from development folds only; blind observed only.\n")
 
     out.append("## Per fold × horizon table (dev folds)\n")
     render_table(metrics, dev_folds, out)

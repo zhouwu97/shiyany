@@ -17,6 +17,10 @@ from gas_forecast.aggressive_model import AggressiveR75LGBForecaster
 from gas_forecast.data import align_tables
 from gas_forecast.experiments import build_fingerprints, finalize_run, write_json
 from gas_forecast.submission import package_submission, validate_submission_frame
+from gas_forecast.submission_quality import (
+    COMPETITION_QUALITY_POLICY,
+    prepare_submission_input,
+)
 from gas_forecast.workflow import predict_rolling
 
 
@@ -61,11 +65,20 @@ def main() -> None:
     input_path.parent.mkdir(parents=True, exist_ok=True)
     input_missing_cells = int(input_features.isna().sum().sum())
     input_export = input_features.replace([np.inf, -np.inf], np.nan).ffill().fillna(0.0)
-    input_export.reset_index().to_csv(input_path, index=False, encoding="utf-8")
+    quality_input, quality_report = prepare_submission_input(
+        input_export.reset_index(),
+        COMPETITION_QUALITY_POLICY,
+    )
+    quality_input.to_csv(input_path, index=False, encoding="utf-8")
     result_frame = predictions.reset_index()
     result_frame.to_csv(result_path, index=False, encoding="utf-8")
     validation = validate_submission_frame(result_frame, model.config)
-    package_submission(input_path, result_path, archive_path)
+    package_submission(
+        input_path,
+        result_path,
+        archive_path,
+        quality_policy=COMPETITION_QUALITY_POLICY,
+    )
 
     confirmed = pd.read_parquet(args.oof_confirmation)
     raw_column = "confirmed_blend_lgb_residual_pred_20"
@@ -129,6 +142,7 @@ def main() -> None:
             "report": "report.json",
             "blind_confirmation": "blind_confirmation.json",
             "input_export_forward_filled_cells": input_missing_cells,
+            "submission_quality": quality_report,
             "validation": validation,
             **fingerprints,
         },

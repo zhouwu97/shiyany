@@ -28,6 +28,10 @@ class FeatureConfig:
     enable_price_delta_features: bool = False
     enable_price_interactions: bool = False
     enable_ramp_features: bool = False
+    enable_rich_quantile_features: bool = False
+    enable_rich_ramp_state_features: bool = False
+    enable_rich_gas_resource_features: bool = False
+    rich_quantile_windows: tuple[int, ...] = (8, 32, 96)
     relation_features: tuple[str, ...] = ()
     dynamic_feature_scope: str = "none"
     dynamic_lags: tuple[int, ...] = (1, 2, 4, 8)
@@ -184,6 +188,7 @@ def forecast_config_from_dict(payload: Mapping[str, object]) -> ForecastConfig:
         "dynamic_lags",
         "dynamic_rolling_windows",
         "relation_features",
+        "rich_quantile_windows",
     ):
         if key in feature_payload:
             feature_payload[key] = tuple(feature_payload[key])

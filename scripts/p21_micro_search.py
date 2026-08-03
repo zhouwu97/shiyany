@@ -29,7 +29,6 @@ from gas_forecast.data import align_tables
 from gas_forecast.features import build_causal_features, load_price_schedule
 from gas_forecast.model_ensemble import GasAwareEnsembleForecaster
 from gas_forecast.oof import _base_fold_rows
-from gas_forecast.scoring import absolute_percentage_error
 from gas_forecast.splits import make_outer_folds
 from gas_forecast.targets import build_delta_targets
 
@@ -180,7 +179,9 @@ def main() -> None:
         variant_map = _alpha_variants(args.recent_days)
     else:
         variant_map = _combo_variants(args.recent_days)
-    overrides_for = lambda name: variant_map[name]
+    def overrides_for(name: str):
+        return variant_map[name]
+
     assert args.baseline in variant_map
     assert all(c in variant_map for c in candidates)
 

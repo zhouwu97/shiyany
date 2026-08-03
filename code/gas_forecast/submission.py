@@ -11,6 +11,12 @@ import numpy as np
 import pandas as pd
 
 from gas_forecast.config import ForecastConfig
+from gas_forecast.submission_quality import (
+    SubmissionQualityPolicy,
+    audit_submission_quality,
+    enforce_submission_quality,
+    prepare_submission_input,
+)
 
 SUBMISSION_MEMBERS = ["input.csv", "s_result.csv"]
 
@@ -72,6 +78,9 @@ def validate_submission_frame(
 def validate_submission_input(
     input_frame: pd.DataFrame,
     result_frame: pd.DataFrame,
+    *,
+    quality_policy: SubmissionQualityPolicy | None = None,
+    enforce_quality: bool = False,
 ) -> dict[str, object]:
     """校验提交输入特征，并确认它与预测结果逐行对应。"""
 
@@ -99,12 +108,20 @@ def validate_submission_input(
     if features.isna().any().any() or not np.isfinite(features.to_numpy()).all():
         raise ValueError("input.csv 的模型输入字段含缺失值、非数值或非有限值")
 
-    return {
+    summary: dict[str, object] = {
         "rows": len(input_frame),
         "input_columns": len(features.columns),
         "start": str(timestamps.iloc[0]),
         "end": str(timestamps.iloc[-1]),
     }
+    if quality_policy is not None:
+        quality = (
+            enforce_submission_quality(input_frame, quality_policy)
+            if enforce_quality
+            else audit_submission_quality(input_frame, quality_policy)
+        )
+        summary["quality"] = quality
+    return summary
 
 
 def _zip_info(name: str) -> zipfile.ZipInfo:
@@ -120,6 +137,7 @@ def validate_submission_archive(
     *,
     expected_input_path: str | Path | None = None,
     expected_result_path: str | Path | None = None,
+    quality_policy: SubmissionQualityPolicy | None = None,
 ) -> dict[str, object]:
     """校验 ZIP 成员、内部 CSV，以及可选的磁盘源文件一致性。"""
 
@@ -131,10 +149,22 @@ def validate_submission_archive(
         archived_result = pd.read_csv(io.BytesIO(archive.read("s_result.csv")))
 
     result_summary = validate_submission_frame(archived_result)
-    input_summary = validate_submission_input(archived_input, archived_result)
+    input_summary = validate_submission_input(
+        archived_input,
+        archived_result,
+        quality_policy=quality_policy,
+        enforce_quality=quality_policy is not None,
+    )
     if expected_input_path is not None:
         expected_input = pd.read_csv(expected_input_path)
-        validate_submission_input(expected_input, archived_result)
+        if quality_policy is not None:
+            expected_input, _ = prepare_submission_input(expected_input, quality_policy)
+        validate_submission_input(
+            expected_input,
+            archived_result,
+            quality_policy=quality_policy,
+            enforce_quality=quality_policy is not None,
+        )
         if list(expected_input.columns) != list(archived_input.columns):
             raise ValueError("磁盘 input.csv 与 ZIP 内 input.csv 字段不一致")
         np.testing.assert_allclose(
@@ -170,11 +200,21 @@ def package_submission(
     input_path: str | Path,
     result_path: str | Path,
     output_zip: str | Path,
+    *,
+    quality_policy: SubmissionQualityPolicy | None = None,
 ) -> dict[str, object]:
     input_frame = pd.read_csv(input_path)
     result_frame = pd.read_csv(result_path)
+    quality_report: dict[str, object] | None = None
+    if quality_policy is not None:
+        input_frame, quality_report = prepare_submission_input(input_frame, quality_policy)
     result_summary = validate_submission_frame(result_frame)
-    input_summary = validate_submission_input(input_frame, result_frame)
+    input_summary = validate_submission_input(
+        input_frame,
+        result_frame,
+        quality_policy=quality_policy,
+        enforce_quality=quality_policy is not None,
+    )
     input_buffer = io.StringIO()
     result_buffer = io.StringIO()
     input_frame.to_csv(input_buffer, index=False, lineterminator="\n")
@@ -203,14 +243,18 @@ def package_submission(
         destination,
         expected_input_path=input_path,
         expected_result_path=result_path,
+        quality_policy=quality_policy,
     )
-    return {
+    summary: dict[str, object] = {
         **result_summary,
         **input_summary,
         "prediction_columns": result_summary["prediction_columns"],
         "archive_members": archive_summary["members"],
         "archive": str(destination),
     }
+    if quality_report is not None:
+        summary["quality_repair"] = quality_report
+    return summary
 
 
 def export_legacy_json(result_path: str | Path, output_path: str | Path) -> dict[str, object]:

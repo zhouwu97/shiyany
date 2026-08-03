@@ -8,10 +8,16 @@ import shutil
 from dataclasses import asdict
 from pathlib import Path
 
+import numpy as np
+
 from gas_forecast.config import legacy_forecast_config
 from gas_forecast.data import align_tables
 from gas_forecast.experiments import build_fingerprints, finalize_run, write_json
 from gas_forecast.submission import package_submission, validate_submission_frame
+from gas_forecast.submission_quality import (
+    COMPETITION_QUALITY_POLICY,
+    prepare_submission_input,
+)
 from gas_forecast.workflow import predict_rolling, train_model
 
 
@@ -106,10 +112,20 @@ def main() -> None:
     input_features, predictions = predict_rolling(train_dir, test_dir, model_path)
     result_frame = predictions.reset_index()
     result_path.parent.mkdir(parents=True, exist_ok=True)
-    input_features.reset_index().to_csv(input_path, index=False, encoding="utf-8")
+    input_export = input_features.replace([np.inf, -np.inf], np.nan).ffill().fillna(0.0)
+    quality_input, quality_report = prepare_submission_input(
+        input_export.reset_index(),
+        COMPETITION_QUALITY_POLICY,
+    )
+    quality_input.to_csv(input_path, index=False, encoding="utf-8")
     result_frame.to_csv(result_path, index=False, encoding="utf-8")
     validation = validate_submission_frame(result_frame, config)
-    package_submission(input_path, result_path, archive_path)
+    package_submission(
+        input_path,
+        result_path,
+        archive_path,
+        quality_policy=COMPETITION_QUALITY_POLICY,
+    )
     shutil.copy2(args.c0_run / "oof_with_routes.csv", args.run_dir / "oof.csv")
     shutil.copy2(args.c0_run / "report.json", args.run_dir / "report.json")
     shutil.copy2(args.c0_run / "selection.json", args.run_dir / "selection.json")
@@ -131,6 +147,7 @@ def main() -> None:
             "submission": "submission.zip",
             "validation": validation,
             "c0_run": str(args.c0_run.resolve()),
+            "submission_quality": quality_report,
             **fingerprints,
         },
     )

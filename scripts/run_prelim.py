@@ -12,6 +12,10 @@ from gas_forecast.submission import (
     package_submission,
     validate_submission_frame,
 )
+from gas_forecast.submission_quality import (
+    COMPETITION_QUALITY_POLICY,
+    prepare_submission_input,
+)
 from gas_forecast.workflow import predict_rolling, train_model
 
 
@@ -40,11 +44,20 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     input_path = output_dir / "input.csv"
     result_path = output_dir / "s_result.csv"
-    features.reset_index().to_csv(input_path, index=False, encoding="utf-8")
+    quality_input, quality_report = prepare_submission_input(
+        features.reset_index(),
+        COMPETITION_QUALITY_POLICY,
+    )
+    quality_input.to_csv(input_path, index=False, encoding="utf-8")
     result_frame = predictions.reset_index()
     result_frame.to_csv(result_path, index=False, encoding="utf-8")
     validation = validate_submission_frame(result_frame)
-    archive = package_submission(input_path, result_path, archive_path)
+    archive = package_submission(
+        input_path,
+        result_path,
+        archive_path,
+        quality_policy=COMPETITION_QUALITY_POLICY,
+    )
     legacy_json = export_legacy_json(result_path, output_dir / "result_legacy.json")
 
     payload = {
@@ -56,6 +69,7 @@ def main() -> None:
         "result_csv": str(result_path),
         "validation": validation,
         "archive": archive,
+        "submission_quality": quality_report,
         "legacy_json": legacy_json,
         "test_labels_used": False,
     }

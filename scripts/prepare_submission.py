@@ -25,6 +25,10 @@ from gas_forecast.submission import (
     validate_submission_frame,
     validate_submission_input,
 )
+from gas_forecast.submission_quality import (
+    COMPETITION_QUALITY_POLICY,
+    prepare_submission_input,
+)
 
 
 def sha256(path: Path) -> str:
@@ -187,18 +191,43 @@ def main() -> None:
     validation = validate_submission_frame(result_frame)
     if args.input_file:
         source_input = pd.read_csv(args.input_file)
-        validate_submission_input(source_input, result_frame)
-        shutil.copy2(args.input_file, input_file)
+        quality_input, _ = prepare_submission_input(
+            source_input,
+            COMPETITION_QUALITY_POLICY,
+        )
+        validate_submission_input(
+            quality_input,
+            result_frame,
+            quality_policy=COMPETITION_QUALITY_POLICY,
+            enforce_quality=True,
+        )
+        quality_input.to_csv(input_file, index=False, encoding="utf-8")
     if not input_file.exists():
         raise SystemExit("best 缺少 input.csv；请用 --input-file 提供同一冻结模型的推理输入")
-    input_validation = validate_submission_input(pd.read_csv(input_file), result_frame)
+    quality_input, quality_report = prepare_submission_input(
+        pd.read_csv(input_file),
+        COMPETITION_QUALITY_POLICY,
+    )
+    quality_input.to_csv(input_file, index=False, encoding="utf-8")
+    input_validation = validate_submission_input(
+        quality_input,
+        result_frame,
+        quality_policy=COMPETITION_QUALITY_POLICY,
+        enforce_quality=True,
+    )
     if int(validation["rows"]) != 192 or int(validation["prediction_columns"]) != 16:
         raise SystemExit(f"提交结果尺寸不符合要求: {validation}")
-    package_submission(input_file, result, archive)
+    package_submission(
+        input_file,
+        result,
+        archive,
+        quality_policy=COMPETITION_QUALITY_POLICY,
+    )
     archive_validation = validate_submission_archive(
         archive,
         expected_input_path=input_file,
         expected_result_path=result,
+        quality_policy=COMPETITION_QUALITY_POLICY,
     )
     if any(character in args.team_name for character in '<>:"/\\|?*') or not args.team_name.strip():
         raise SystemExit("队伍名称为空或含 Windows 文件名非法字符")
@@ -231,6 +260,7 @@ def main() -> None:
         "validation": validation,
         "input": input_validation,
         "archive": archive_validation,
+        "quality_repair": quality_report,
     }
     write_json(args.best_dir / "submission.json", submission_receipt)
     write_json(args.best_dir / "manifest.json", manifest)

@@ -6,7 +6,6 @@ c0_error_atlas.py — 无需训练的 D1 + D3 诊断
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -120,7 +119,7 @@ def run_d1(oof: pd.DataFrame) -> None:
     # --- fold × horizon 胜负矩阵 ---
     pivot = df_cell.pivot(index="fold", columns="horizon", values="V3_minus_V2")
     pivot.to_csv(OUT_DIR / "fold_horizon_matrix.csv")
-    print(f"  → fold_horizon_matrix.csv")
+    print("  → fold_horizon_matrix.csv")
 
     # --- 打印摘要供快速判断 ---
     print("\n  ── horizon 汇总 (generator_1) ──")
@@ -222,7 +221,7 @@ def run_d3() -> None:
     # 延迟 switch 误差 (步数不同)
     step_wrong = int(((sw_fix & sw_bug) & (first_bug != first_fix)).sum())
 
-    print(f"\n  ── price switch 统计 ──")
+    print("\n  ── price switch 统计 ──")
     print(f"  修正后检测到 switch 时间步: {n_switch_fix} / {len(ts)}")
     print(f"  BUG 代码检测到 switch 时间步: {n_switch_bug} / {len(ts)}")
     print(f"  立即 switch (t→t+15) BUG 漏掉: {immediate_switch_missed}")
@@ -237,7 +236,7 @@ def run_d3() -> None:
             diverge_count=("diverges", "sum"),
         ).reset_index()
         monthly.to_csv(OUT_DIR / "price_switch_monthly.csv", index=False)
-        print(f"\n  按月分布:")
+        print("\n  按月分布:")
         print(monthly.to_string(index=False))
     print()
 
@@ -290,7 +289,7 @@ def write_summary(d1_df: pd.DataFrame, d3_stats: dict) -> None:
 
     with open(OUT_DIR / "summary.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
-    print(f"  → summary.json")
+    print("  → summary.json")
     print(f"\n  ══ D1 GATE: {'PASS ✓' if pass_d1 else 'FAIL ✗ — 停止 V3 长程路线'} ══")
 
 

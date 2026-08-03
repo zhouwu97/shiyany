@@ -22,6 +22,7 @@ from gas_forecast.submission import (
     validate_submission_frame,
     validate_submission_input,
 )
+from gas_forecast.submission_quality import COMPETITION_QUALITY_POLICY
 from gas_forecast.workflow import resolve_prediction_feature_config
 
 
@@ -62,6 +63,7 @@ def _zip_receipt(path: Path, input_path: Path, result_path: Path) -> dict[str, o
             path,
             expected_input_path=input_path,
             expected_result_path=result_path,
+            quality_policy=COMPETITION_QUALITY_POLICY,
         )
     except (OSError, ValueError, AssertionError) as exc:
         return {"valid": False, "error": str(exc)}
@@ -143,7 +145,12 @@ def main() -> None:
     input_frame = pd.read_csv(input_path)
     submission_frame = pd.read_csv(result_path)
     validation = validate_submission_frame(submission_frame, config)
-    input_validation = validate_submission_input(input_frame, submission_frame)
+    input_validation = validate_submission_input(
+        input_frame,
+        submission_frame,
+        quality_policy=COMPETITION_QUALITY_POLICY,
+        enforce_quality=True,
+    )
     zip_receipt = _zip_receipt(archive_path, input_path, result_path)
     submission_receipt = {
         "valid": bool(zip_receipt["valid"]),

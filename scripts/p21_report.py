@@ -32,7 +32,7 @@ def main() -> None:
         short = [byh[f"t+{h}"] for h in (15, 30, 45)]
         med = [byh[f"t+{h}"] for h in (60, 75, 90)]
         long = [byh[f"t+{h}"] for h in (105, 120)]
-        print(f"   Δ by horizon (short t15-45 / med t60-90 / long t105-120):")
+        print("   Δ by horizon (short t15-45 / med t60-90 / long t105-120):")
         print(f"     short={sum(short)/3:+.4f}  med={sum(med)/3:+.4f}  long={sum(long)/2:+.4f}")
         horizon_row = " ".join(f"{byh['t+' + str(h)]:+.3f}" for h in HORIZONS_MIN)
         print(f"     t+15..t+120: {horizon_row}")

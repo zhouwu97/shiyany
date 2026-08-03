@@ -20,7 +20,7 @@ Strict C0 冻结基线为 pooled MAPE `5.297932%`（含最终 blind 的全 OOF �
 - development（不含 blind）经生产容量投影后 MAPE `5.229437%`，相对同口径 C0 改善 `0.030575pp`；
 - 19 个 development folds 中赢 14 个，最近 5 折赢 4 个；
 - 冻结后唯一一次 blind 确认改善 `0.040860pp`；
-- Production Gate 的 250 个未来扰动、92 项 pytest、192×16 提交校验和确定性 ZIP 全部通过。
+- Production Gate 的 250 个未来扰动、历史 92 项 pytest、192×16 提交校验和确定性 ZIP 全部通过；提交质量修复后当前测试套件为 95 项。
 
 正式初赛提交为 `提交这个/咕咕嘎嘎_gas_predict_prelim.zip`，ZIP 根目录只包含 `input.csv` 与 `s_result.csv`。第二梯队 CatBoost/Recursive ARX 已实现固定规格，但因主线已得到强晋级结果而未启动大规模 OOF 训练；复赛、决赛和优化调度仍不实现。
 
@@ -67,6 +67,49 @@ data/raw/scoring/初赛-评分所用测试集/
 pytest -q
 python scripts/audit_data.py --data-dir "data/raw/official/初赛-参赛者使用"
 ```
+
+## 提交输入质量
+
+正式打包会执行 `submission_quality.py` 中的初赛 raw schema 与无标签 IQR 修复：原始字段收敛为 21 列，额外原始字段不会伪装成有效观测；派生字段必须保留 `feat_` 前缀。该步骤不改动 `s_result.csv`，因此可在冻结预测不变的前提下独立修复数据质量链路。
+
+`scripts/prepare_submission.py` 和 `scripts/package_submission.py` 默认启用该质量策略；`scripts/production_gate.py` 会将额外 raw 字段、常数 raw 字段和登记字段的未修复 IQR 越界视为失败。
+
+需要保留 Q0/Q1/Q2 上传消融包时，可执行：
+
+```powershell
+python scripts/run_quality_ablation.py `
+  --input "提交这个/input.csv" `
+  --result "提交这个/s_result.csv" `
+  --output-dir results/quality/<run-name>
+
+python scripts/compare_submission_quality.py `
+  --candidate results/quality/<run-name>/Q2_schema_and_repair/submission.zip `
+  --reference <满质量参考包.zip>
+```
+
+参考包仅作为 schema 与回归 oracle；质量策略不会读取、复制或按日期替换参考包中的 192 行值。
+
+## 已验收 RichResidual 候选
+
+`rich_gas_blend_30` 是对冻结 `aggressive_r75_lgb20` 的 `generator_1` 小权重残差修正候选。它先用严格、时间前向的 Champion OOF 选择 `gas + 30%`，然后只在一次 final/blind 验收已经完成后，显式允许 blind OOF 参与全量残差重训。该候选与当前正式 `results/best/` 和 `提交这个/` 相互独立；生成和门禁均不自动晋级：
+
+```powershell
+python scripts/complete_rich_residual_candidate.py `
+  --base-model "results/raw/runs/training/aggressive_r75_lgb20_20260802/model.joblib" `
+  --baseline-oof "results/raw/runs/training/aggressive_r75_lgb20_20260802/oof.csv" `
+  --rich-final-run "results/raw/runs/experiments/rich_residual_final_gas_20260803" `
+  --data-dir "data/raw/official/初赛-参赛者使用" `
+  --test-dir "data/raw/scoring/初赛-评分所用测试集" `
+  --run-dir "results/raw/runs/training/rich_gas_blend_30_20260803" `
+  --allow-confirmed-blind-oof
+
+python scripts/production_gate.py `
+  --run-dir "results/raw/runs/training/rich_gas_blend_30_20260803" `
+  --data-dir "data/raw/official/初赛-参赛者使用" `
+  --origins 50 --jobs 8 --no-promote
+```
+
+脚本会校验 final 收据、基线 OOF、特征配置和固定 30% 融合权重；未传入 `--allow-confirmed-blind-oof` 时，blind 标签默认不能用于重训。
 
 ## 训练、预测与提交
 

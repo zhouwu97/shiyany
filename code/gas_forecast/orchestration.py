@@ -19,6 +19,10 @@ from gas_forecast.routing import leave_one_fold_out_route
 from gas_forecast.selection import choose_version
 from gas_forecast.selection_competition import choose_competition_candidate
 from gas_forecast.submission import package_submission, validate_submission_frame
+from gas_forecast.submission_quality import (
+    COMPETITION_QUALITY_POLICY,
+    prepare_submission_input,
+)
 from gas_forecast.validation import backtest_model
 from gas_forecast.workflow import predict_rolling, train_model
 
@@ -193,7 +197,11 @@ def run_automated_pipeline(
     output_dir.mkdir(parents=True, exist_ok=True)
     input_path = output_dir / "input.csv"
     result_path = output_dir / "s_result.csv"
-    input_features.reset_index().to_csv(input_path, index=False, encoding="utf-8")
+    quality_input, quality_report = prepare_submission_input(
+        input_features.reset_index(),
+        COMPETITION_QUALITY_POLICY,
+    )
+    quality_input.to_csv(input_path, index=False, encoding="utf-8")
     result_frame = predictions.reset_index()
     result_frame.to_csv(result_path, index=False, encoding="utf-8")
     validation = validate_submission_frame(result_frame)
@@ -201,7 +209,12 @@ def run_automated_pipeline(
         raise RuntimeError(
             f"提交结果应有{expected_rows}行，实际为{validation['rows']}行"
         )
-    archive = package_submission(input_path, result_path, archive_path)
+    archive = package_submission(
+        input_path,
+        result_path,
+        archive_path,
+        quality_policy=COMPETITION_QUALITY_POLICY,
+    )
 
     summary: dict[str, object] = {
         "run_dir": str(run_path),
@@ -216,6 +229,7 @@ def run_automated_pipeline(
         "input_csv": str(input_path),
         "result_csv": str(result_path),
         "archive": archive,
+        "submission_quality": quality_report,
         "validation": validation,
         "sha256": {
             "model": sha256_file(model_path),
@@ -345,14 +359,23 @@ def run_competition_pipeline(
     submission_dir.mkdir(parents=True, exist_ok=True)
     input_path = submission_dir / "input.csv"
     result_path = submission_dir / "s_result.csv"
-    input_features.reset_index().to_csv(input_path, index=False, encoding="utf-8")
+    quality_input, quality_report = prepare_submission_input(
+        input_features.reset_index(),
+        COMPETITION_QUALITY_POLICY,
+    )
+    quality_input.to_csv(input_path, index=False, encoding="utf-8")
     result_frame = predictions.reset_index()
     result_frame.to_csv(result_path, index=False, encoding="utf-8")
     validation = validate_submission_frame(result_frame)
     if int(validation["rows"]) != expected_rows:
         raise RuntimeError(f"提交结果应有 {expected_rows} 行，实际为 {validation['rows']} 行")
     archive_path = run_path / "submission.zip"
-    package_submission(input_path, result_path, archive_path)
+    package_submission(
+        input_path,
+        result_path,
+        archive_path,
+        quality_policy=COMPETITION_QUALITY_POLICY,
+    )
     summary = {
         "run_dir": str(run_path),
         "selected_candidate": selected,
@@ -361,6 +384,7 @@ def run_competition_pipeline(
         "model": str(model_path),
         "result_csv": str(result_path),
         "archive": str(archive_path),
+        "submission_quality": quality_report,
         "validation": validation,
         "train_audit": train_dataset.audit.to_dict(),
         "test_audit": test_dataset.audit.to_dict(),

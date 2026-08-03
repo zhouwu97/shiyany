@@ -98,3 +98,17 @@
 - 统一 Diversity 的 `R75 + 20% lgb_residual` 经生产容量投影后，development MAPE 为 `5.229437%`，相对同口径 C0 改善 `0.030575pp`，14/19 折获胜、最近 5 折赢 4；冻结后唯一一次 blind 确认改善 `0.040860pp`，状态为 `PROMOTE`。
 - 新候选通过 50 起点×5 扰动、92 项 pytest、提交校验和确定性 ZIP；`production_gate_passed=true`。正式 best 更新为 `aggressive_r75_lgb20`，不再启动第二梯队的大规模 OOF 消耗。
 - 成功 ZIP 样板与正式 ZIP 均通过同一契约：根目录 `input.csv`、`s_result.csv`，UTF-8，192 个一致时间戳，结果 16 个预测列。样板特征属于旧模型，不能复制替换当前模型 input。
+
+## 2026-08-03 初赛提交输入质量修复
+
+- 以 574KB 满质量参考包作为回归 oracle 重新审计后，确认原 81 分包的 25 个 raw 字段逐值保留了官方测试原始读数；其中多出 `air_heater_5`、`into_gas_mixed_blast_furnace`、`blast_furnace_user4`、`converter_user1`，且 `air_heater_5`、`converter_user1` 为全零、`into_gas_mixed_blast_furnace` 稀疏，均会造成 raw schema 风险。
+- 新增 `submission_quality.py`：固定初赛 21 列 raw schema，保留所有 `feat_` 派生字段，并对已登记高风险字段执行无标签、收敛式批次 `Q1±IQR` 裁剪。参考包只用于验证规则，不进入运行时输入，也不复制其 192 行数值。
+- 新增 Q0/Q1/Q2 消融和 ZIP 对照工具；Q2 相比原包移除 4 个未登记 raw 字段、修复 145 个登记异常，raw schema 与参考包一致，预测宽表逐值未变。参考 raw 值差异由 186 个单元降至 107 个单元；剩余连续故障段需要平台质量 A/B 结果后才可安全指定更强的替代估计器。
+- 正式 `提交这个/咕咕嘎嘎_gas_predict_prelim.zip` 已重建为 `fd707590aaa54cb3e964e70d1255f2ffa5277a7c399c58aea4068163dced6b41`，通过 192×16、双文件、raw schema、常数列和 IQR 质量校验；本地完整测试为 95 passed。
+
+## 2026-08-03 RichResidual 严格 OOF 验收与生产候选
+
+- 在 Champion `aggressive_r75_lgb20` 的同折 OOF 上，残差标签固定为 `actual - same_fold_champion_prediction`；每个外层折只使用 `origin_time <= train_end` 的历史 OOF。筛选后冻结的唯一配置为 `gas` 特征组与 30% 固定融合，blind 不参与特征组或融合权重选择。
+- final 共 62,858 个评分单元：候选 pooled MAPE 为 `5.254319%`，相对 Champion 的 `5.266622%` 改善 `0.012304pp`；`generator_1` 改善 `0.024056pp`，12/20 折获胜、最近 5 个开发折赢 3。一次性 blind 从 `5.750015%` 降至 `5.729442%`，改善 `0.020573pp`；全样本日块 bootstrap 支持概率为 94.80%，开发期为 91.75%。
+- `fit_full_rich_residual_corrector()` 默认仍剔除 blind OOF；只有生产脚本显式传入 `--allow-confirmed-blind-oof`，且 final 收据已验证后，才允许将已确认 blind 标签用于一次全量残差重训。该授权会写入 `blind_confirmation.json`、`report.json` 和 manifest。
+- 生产候选位于 `results/raw/runs/training/rich_gas_blend_30_20260803/`：50 起点 × 5 类未来扰动全部通过、pytest 为 103 passed、21 raw schema/IQR/ZIP 校验通过，`production_gate_passed=true`。门禁使用 `--no-promote`，因此 `results/best/` 和 `提交这个/` 未被修改；平台尚未上传验证输入质量分，不对平台分数作提升声明。

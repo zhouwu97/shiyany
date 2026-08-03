@@ -197,6 +197,116 @@ def _add_ramp_features(
     output["feat_generator_1_ramp_down_run_length"] = _run_length(diff.lt(0))
 
 
+def _steps_since_event(event: pd.Series) -> pd.Series:
+    """返回距最近一次事件的步数；首次事件前保持缺失而不伪造历史。"""
+
+    event = event.fillna(False).astype(bool)
+    groups = event.cumsum()
+    age = event.groupby(groups, sort=False).cumcount()
+    return age.where(groups.gt(0)).astype(float)
+
+
+def _add_rich_quantile_features(
+    output: dict[str, pd.Series | np.ndarray],
+    series: pd.Series,
+    prefix: str,
+    config: FeatureConfig,
+) -> None:
+    """增加稳健历史分位数，窗口末端始终停在预测起点之前。"""
+
+    history = series.shift(1)
+    for window in config.rich_quantile_windows:
+        if window < 2:
+            raise ValueError("rich_quantile_windows 中的窗口必须至少为 2")
+        rolling = history.rolling(window, min_periods=max(2, window // 2))
+        output[f"feat_rich_quantile_{prefix}_q10_{window}"] = rolling.quantile(0.10)
+        output[f"feat_rich_quantile_{prefix}_q90_{window}"] = rolling.quantile(0.90)
+
+
+def _add_rich_ramp_state_features(
+    output: dict[str, pd.Series | np.ndarray],
+    series: pd.Series,
+    prefix: str,
+) -> None:
+    """将连续变化率转换为严格因果的上升、稳定和下降运行状态。"""
+
+    rate = series.diff()
+    # 阈值由过去两小时的变化率分位数决定，当前变化率只用于判定当前状态。
+    threshold = rate.abs().shift(1).rolling(8, min_periods=4).quantile(0.75)
+    ramp_up = rate.gt(threshold)
+    ramp_down = rate.lt(-threshold)
+    stable = rate.abs().le(threshold)
+    ramp_event = ramp_up | ramp_down
+    output[f"feat_rich_ramp_{prefix}_rate"] = rate
+    output[f"feat_rich_ramp_{prefix}_threshold"] = threshold
+    output[f"feat_rich_ramp_{prefix}_up"] = ramp_up.astype("int8")
+    output[f"feat_rich_ramp_{prefix}_down"] = ramp_down.astype("int8")
+    output[f"feat_rich_ramp_{prefix}_stable"] = stable.astype("int8")
+    output[f"feat_rich_ramp_{prefix}_time_since_event"] = _steps_since_event(ramp_event)
+    output[f"feat_rich_ramp_{prefix}_up_run_length"] = _run_length(ramp_up)
+    output[f"feat_rich_ramp_{prefix}_down_run_length"] = _run_length(ramp_down)
+    output[f"feat_rich_ramp_{prefix}_stable_run_length"] = _run_length(stable)
+
+
+def _add_rich_gas_resource_features(
+    output: dict[str, pd.Series | np.ndarray],
+    filled: pd.DataFrame,
+    *,
+    bf_production: pd.Series,
+    air_heater_use: pd.Series,
+    bf_user_use: pd.Series,
+    mixed_bf: pd.Series,
+    converter_users: pd.Series,
+) -> None:
+    """构造煤气产量、优先需求和可供发电余量等资源状态。"""
+
+    unavailable = pd.Series(np.nan, index=filled.index, dtype=float)
+    coke_production = filled.get("coke_oven_1", unavailable)
+    converter_production = filled.get("converter_1", unavailable)
+    mixed_coke = filled.get("into_gas_mixed_coke", unavailable)
+    mixed_converter = filled.get("into_gas_mixed_converter", unavailable)
+    total_production = pd.concat(
+        [bf_production, coke_production, converter_production], axis=1
+    ).sum(axis=1, min_count=1)
+    priority_demand = pd.concat(
+        [
+            air_heater_use,
+            bf_user_use,
+            mixed_bf,
+            mixed_coke,
+            converter_users,
+            mixed_converter,
+        ],
+        axis=1,
+    ).sum(axis=1, min_count=1)
+    available_for_generation = total_production - priority_demand
+    demand_denominator = priority_demand.replace(0.0, np.nan)
+    production_denominator = total_production.replace(0.0, np.nan)
+    output["feat_rich_gas_total_production"] = total_production
+    output["feat_rich_gas_priority_demand"] = priority_demand
+    output["feat_rich_gas_available_for_generation"] = available_for_generation
+    output["feat_rich_gas_production_demand_ratio"] = total_production / demand_denominator
+    output["feat_rich_gas_available_production_ratio"] = (
+        available_for_generation / production_denominator
+    )
+
+    production_parts = {
+        "blast": bf_production,
+        "coke": coke_production,
+        "converter": converter_production,
+    }
+    for name, value in production_parts.items():
+        output[f"feat_rich_gas_{name}_production_share"] = value / production_denominator
+
+    holder = filled.get("blast_furnace_gas_holder_2")
+    if holder is not None:
+        output["feat_rich_gas_holder_buffer"] = holder
+        output["feat_rich_gas_holder_to_production_ratio"] = holder / production_denominator
+        output["feat_rich_gas_holder_to_available_ratio"] = holder / available_for_generation.replace(
+            0.0, np.nan
+        )
+
+
 def _add_relation_features(
     output: dict[str, pd.Series | np.ndarray],
     filled: pd.DataFrame,
@@ -334,6 +444,16 @@ def build_causal_features(
         "coke_balance": coke_balance,
         "converter_balance": converter_balance,
     }
+    if config.enable_rich_gas_resource_features:
+        _add_rich_gas_resource_features(
+            feature_values,
+            filled,
+            bf_production=bf_production,
+            air_heater_use=air_heater_use,
+            bf_user_use=bf_user_use,
+            mixed_bf=mixed_bf,
+            converter_users=converter_users,
+        )
     if config.enable_physical_features:
         for name, balance in balances.items():
             feature_values[f"feat_{name}"] = balance
@@ -434,6 +554,34 @@ def build_causal_features(
         for target in ("generator_1", "generator_all"):
             if target in filled:
                 _add_target_aligned_features(feature_values, filled[target], target, config)
+
+    if config.enable_rich_quantile_features:
+        rich_quantile_series: dict[str, pd.Series] = {
+            "generator_gas_total": generator_gas_total,
+            "bf_surplus_proxy": feature_values["feat_bf_surplus_proxy"],
+            **balances,
+        }
+        if "generator_1" in filled:
+            rich_quantile_series["generator_1"] = filled["generator_1"]
+        if "generator_all" in filled:
+            rich_quantile_series["generator_all"] = filled["generator_all"]
+        if "feat_generator_rest" in feature_values:
+            rich_quantile_series["generator_rest"] = feature_values["feat_generator_rest"]
+        if "blast_furnace_gas_holder_2" in filled:
+            rich_quantile_series["gas_holder"] = filled["blast_furnace_gas_holder_2"]
+        for name, series in rich_quantile_series.items():
+            _add_rich_quantile_features(feature_values, series, name, config)
+
+    if config.enable_rich_ramp_state_features:
+        rich_ramp_series: dict[str, pd.Series] = {}
+        if "generator_1" in filled:
+            rich_ramp_series["generator_1"] = filled["generator_1"]
+        if "generator_all" in filled:
+            rich_ramp_series["generator_all"] = filled["generator_all"]
+        if "feat_generator_rest" in feature_values:
+            rich_ramp_series["generator_rest"] = feature_values["feat_generator_rest"]
+        for name, series in rich_ramp_series.items():
+            _add_rich_ramp_state_features(feature_values, series, name)
 
     if config.enable_ramp_features and "generator_1" in filled:
         _add_ramp_features(feature_values, filled["generator_1"])

@@ -919,6 +919,18 @@ def _candidate_comparison(
     }
 
 
+def compare_research_candidate(
+    rows: pd.DataFrame,
+    prediction_column: str,
+    baseline_column: str,
+    *,
+    scope: str,
+) -> dict[str, object]:
+    """公开统一 OOF 比较口径，供受控的独立研究分支复用。"""
+
+    return _candidate_comparison(rows, prediction_column, baseline_column, scope=scope)
+
+
 def _capacity_projection_audit(
     rows: pd.DataFrame,
     raw_column: str,

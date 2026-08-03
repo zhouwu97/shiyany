@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from gas_forecast.submission import SUBMISSION_MEMBERS, validate_submission_archive, validate_submission_frame
+from gas_forecast.submission_quality import COMPETITION_QUALITY_POLICY
 
 
 def sha256_file(path: str | Path) -> str:
@@ -71,6 +72,7 @@ def build_freeze_manifest(
         archive_path,
         expected_input_path=input_path,
         expected_result_path=result_path,
+        quality_policy=COMPETITION_QUALITY_POLICY,
     )
     with zipfile.ZipFile(archive_path) as archive:
         archived_input_bytes = archive.read("input.csv")

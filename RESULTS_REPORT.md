@@ -306,3 +306,17 @@ C0 OOF、选择、逐折 checkpoint 和收据位于 `results/raw/runs/oof/clean_
 最终候选只修改 `generator_1`：t+75 至 t+120 以 E21 作为 R75 基线，其他步长保留 Strict C0，然后统一融入 20% 的冻结 V2 LGB residual 分支；`generator_all` 保持 C0，并执行与生产推理相同的 `0 <= generator_1 <= 200`、`generator_1 <= generator_all <= min(440, generator_1 + 240)` 投影。投影影响 605 个 OOF 单元，但指标没有反转。
 
 冻结后只查看一次 blind，改善 `0.040860pp`。正式运行位于 `results/raw/runs/training/aggressive_r75_lgb20_20260802/`；Production Gate 通过 250/250 个未来扰动案例、92 项测试、192×16 提交校验和确定性 ZIP。全 OOF（含 blind）门禁口径为 `5.266622%`，优于原 Strict C0 的 `5.297932%`，现已晋级 `results/best/`。
+
+## 2026-08-03 RichResidual gas + 30% final 验收
+
+RichResidual 仅学习 `generator_1` 的 Champion 残差，训练标签始终是同一外层折 Champion 的 `actual - prediction`。外层预测只能访问 `origin_time <= train_end` 的历史 OOF；`generator_all` 保留 Champion 路径，最终与 `generator_1` 一起通过正式容量投影。筛选阶段只让 `quantile` 与 `gas` 进入 development，固定 30% 权重优于两段融合和时间前向四段路由后，才运行一次 final。
+
+| 口径 | Champion | `rich_gas_blend_30` | 候选 - Champion |
+| --- | ---: | ---: | ---: |
+| pooled MAPE（62,858 单元） | 5.266622% | **5.254319%** | **-0.012304pp** |
+| `generator_1` | 6.068289% | **6.044234%** | **-0.024056pp** |
+| blind MAPE | 5.750015% | **5.729442%** | **-0.020573pp** |
+
+- final 候选赢 12/20 折，最近 5 个开发折赢 3；全样本日块 bootstrap 的候选更优概率为 94.80%，开发期为 91.75%。最终 OOF 与报告位于 `results/raw/runs/experiments/rich_residual_final_gas_20260803/`。
+- 生产包装器 `RichResidualAggressiveForecaster` 保存冻结 Champion 和 full-fit gas corrector。`fit_full_rich_residual_corrector()` 的默认行为不使用 blind；只有 final 已确认后的生产命令显式传入 `--allow-confirmed-blind-oof` 才将 blind 标签加入全量重训，收据明确记录该事实。
+- 生产运行 `results/raw/runs/training/rich_gas_blend_30_20260803/` 通过 50×5=250 个未来扰动、103 项 pytest、192×16 预测、21 个 raw 字段与无遗留 IQR 越界的 ZIP 校验。Production Gate 使用 `--no-promote`，所以这是可审计候选而不是已发布替代品；`results/best/` 和 `提交这个/` 保持原状。
