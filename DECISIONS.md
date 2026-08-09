@@ -35,24 +35,50 @@
   `25CF238C3F58896733002B428DF6967FE09B8BA76C1F713015E2BBB83DEC9BC2`，
   manifest `5C4724ECB008387FBD3CDB9A88BBC05FBDE7966F6F1395AEC4E397B088E15644`。
 
-## 2026-08-09 Q4 reference-quality input A/B 包
+## 2026-08-09 Q4 Oracle 包撤销裁决（禁止上传）
 
-- 预测来源审计确认：A61 目录只有 development/verification 的 `oof.csv`、报告与训练收据，
-  两份 manifest 均为 `stage=A61_recursive_arx_diversity`、`formal_candidate=false`，不存在可
-  独立声明为 A61 的生产 `s_result.csv`。Q4 因此使用已经合法提交、且仓库已有平台准确率
-  `49.9/50` 记录的 `提交这个_训练优化_复跑/咕咕嘎嘎_gas_predict_prelim.zip` 冻结预测；
-  源 ZIP SHA256 为 `65039ac7fd38a23c75a76dcacff79b1230efee07ee201d35ce146c65c7ee1561`，
-  其中 `s_result.csv` SHA256 为
-  `2dfe7f29cbde9faf846e4a03be292a61eceb93469b199963c565bba2a8c37efe`。不得把该预测
-  描述为 A61，也不得改用 aggressive 历史结果冒充 A61。
-- `scripts/run_q4_reference_quality_packages.py` 必须调用正式
+- **撤销先前"合法预测来源"表述**：`提交这个_训练优化_复跑/咕咕嘎嘎_gas_predict_prelim.zip`
+  经字节级复核确认是 `future_row_reconstruction` 非因果 Oracle（提交 `681c6f4` 的
+  `提交这个_训练优化/report.json` 明确写 `candidate=future_row_reconstruction`），其
+  读取 `origin+horizon` 未来评分行，`oracle_candidate=true`、`causal=false`、
+  `formal_candidate=false`、`deployable=false`。源 ZIP SHA256
+  `65039ac7fd38a23c75a76dcacff79b1230efee07ee201d35ce146c65c7ee1561`、其中
+  `s_result.csv` SHA256 `2dfe7f29cbde9faf846e4a03be292a61eceb93469b199963c565bba2a8c37efe`。
+  该预测**严禁**作为正式来源复用、重新封装或上传。
+- 平台曾返回 `89.9` 分是历史事实，但该分来自非因果 Oracle 包，**不能**作为合法预测或
+  模型能力的证据；`Q4 run3/SUB_A_Q_CAUSAL/SUB_B_Q_REFERENCE` 及其 ZIP（
+  `def9a256…`、`0bc5cf66…`）基于上述 Oracle，**禁止上传**，相关记录一并作废。
+- `scripts/run_q4_reference_quality_packages.py` 新增 hard 拒绝：预测源 ZIP 或冻结
+  `s_result` 哈希命中 `future_row_reconstruction` Oracle 登记表时直接
+  `ValueError`；manifest 含 `oracle_candidate/oracle_only/diagnostic_only=true`、
+  `causal=false`、`formal_candidate=false` 或 `candidate=future_row_reconstruction`
+  时同样拒绝；并要求 `production_gate_passed/leakage_passed/tests_passed/submission_valid`
+  全部为真、`hashes.submission` 与源 ZIP 逐字节一致后才允许复用。
+
+## 2026-08-09 Q5 合法参考质量 A/B 包
+
+- 合法源使用 `E:\AI\shiyan\results\raw\runs\training\aggressive_r75_lgb20_20260802`：
+  manifest 记录 `candidate=aggressive_r75_lgb20`、`production_gate_passed=true`，
+  模型的 `Hashes.model` 与 `model.joblib` 一致，leakage 收据 `cases_checked=250`、
+  `failures=[]`（250/250 未来扰动通过），源 ZIP SHA256
+  `e03e70393087ec14e3a0288949980cb07cfa319685573840e62dd4b43b923452`。已逐项复核，
+  未直接相信文档。
+- 复核发现：manifest `hashes.result`（`e0a14a89…`）指向 `submission/s_result.csv`
+  更高精度本地副本，其字节与打包 `submission.zip` 内 6 位小数 `s_result.csv`
+  （`e0f471d8…`）不同但数值一致（max_abs_diff < 5e-7）；打包版与官方
+  `提交这个/咕咕嘎嘎_gas_predict_prelim.zip` 成员逐字节相同，故以被打包冻结字节为准，
+  并通过 `--declared-result-file` 完成数值复核后才复用（不盲信文档）。
+- `scripts/run_q4_reference_quality_packages.py` 走正式
   `gas_forecast.submission.prepare_submission_chain`。训练 input 由冻结正式模型配置通过
-  `align_tables + build_causal_features` 重建，质量统计截止于 `2025-04-30 23:45:00`；评分
-  input 读取上述正式 ZIP 的 `input.csv`。SUB_A 使用链内冻结的 Q_CAUSAL input，SUB_B 使用
-  其独立副本经过 Q_REFERENCE 后的 input；两个包共享完全相同的冻结预测字节。
+  `align_tables + build_causal_features` 从官方训练期数据重建，质量统计截止于
+  `2025-04-30 23:45:00`；评分 input 读取上述合法 ZIP 的 `input.csv`。SUB_A 使用链内
+  冻结的 Q_CAUSAL input，SUB_B 使用其独立副本经过 Q_REFERENCE 后的 input；两个包共享
+  完全相同的冻结预测字节（五处 `s_result.csv` SHA256 均为 `e0f471d8…`）。
 - A/B 目录和 ZIP 根目录都只允许 `input.csv`、`s_result.csv`，两阶段收据统一放在包外
-  `receipts/formal_chain/`。本地报告明确记录平台分数为 `null`、`submitted=false`；没有明确
-  外部授权前不上传，不能由本地零异常门禁推断平台 50/50。
+  `receipts/formal_chain/`。本地报告明确记录平台分数为 `null`、`submitted=false`；
+  全部收据通过后才标记 `LEGAL_Q5_READY_FOR_PLATFORM`，否则 fail closed。
+- Q5 产物落盘 `results/raw/runs/experiments/q5_reference_quality_ab_20260809/`，
+  未写入 `results/best`、`提交这个*` 或任何正式 submission 目录，未上传、未推送。
 - 正式宽表首次运行暴露 CSV 写回复核的真实缺陷：约 30 万量级数值的一 ULP 十进制解析差异
   （最大绝对差 `2.32830644e-10`、相对差约 `1.94e-16`）被 `rtol=0` 误判为内容改变。
   `_assert_same_frame` 最小调整为 `rtol=1e-15, atol=5e-12`，仍严格检查 schema、时间轴、

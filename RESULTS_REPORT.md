@@ -43,9 +43,17 @@ oracle_selection_trajectory.csv SHA-256
 oracle_ceiling_manifest.json SHA-256
 `5C4724ECB008387FBD3CDB9A88BBC05FBDE7966F6F1395AEC4E397B088E15644`。
 
-## 2026-08-09 平台真实评分
+## 2026-08-09 平台真实评分（非因果 Oracle，仅历史记录）
 
-提交：`提交这个_训练优化_复跑/咕咕嘎嘎_gas_predict_prelim.zip`
+> **撤销说明**：该 89.9 分是平台对 `提交这个_训练优化_复跑/咕咕嘎嘎_gas_predict_prelim.zip`
+> 返回的历史事实，但该包经字节级复核是 `future_row_reconstruction` 非因果 Oracle
+> （`candidate=future_row_reconstruction`，源 ZIP SHA256
+> `65039ac7fd38a23c75a76dcacff79b1230efee07ee201d35ce146c65c7ee1561`、`s_result.csv`
+> SHA256 `2dfe7f29cbde9faf846e4a03be292a61eceb93469b199963c565bba2a8c37efe`），读取未来
+> `origin+horizon` 真值，**不能**作为合法预测来源或模型能力证据；Q4 run3/SUB_A/SUB_B
+> 基于该包，**禁止上传**。
+
+提交：`提交这个_训练优化_复跑/咕咕嘎嘎_gas_predict_prelim.zip`（历史记录，结论已撤销作废）
 
 平台返回：`split=gas_power`，`horizons=[15, 30, 45, 60, 75, 90, 105, 120]`。
 
@@ -59,12 +67,17 @@ oracle_ceiling_manifest.json SHA-256
 
 准确率细项：`1mape_1=0.9993`、`1mape_all=0.9993`，对应每个目标 MAPE 约 `0.07%`。
 
-该记录是平台实际返回结果；本地使用参考标签计算的 `98.5668` 分仅作为离线估算，不能替代平台分数。
+该记录是平台实际返回结果；但包本身非因果，分数不构成合法预测证据。本地使用参考标签计算的
+`98.5668` 分仅作为离线估算，同样不构成合法预测证据。
 
-## 2026-08-09 Q4 reference-quality input A/B 本地审计
+## 2026-08-09 Q4 Oracle 包本地审计（作废，禁止上传）
 
-实际运行目录：`.tmp/q4_reference_quality_packages_20260809_run3/`。运行只读取正式评分 input、
-官方训练期生产数据、冻结模型和已合法提交 ZIP；未读取 blind、平台答案或未来真实标签，也未上传。
+> **撤销说明**：`.tmp/q4_reference_quality_packages_20260809_run3/` 使用上述
+> `future_row_reconstruction` Oracle（源 `s_result.csv` SHA256 `2dfe7f29…`）作为冻结预测，
+> 属于被禁止复用的来源。其 SUB_A/SUB_B（ZIP SHA256 `def9a256…`、`0bc5cf66…`）**禁止上传**，
+> 下表仅保留为验证记录，不构成合法参考质量包。
+
+实际运行目录：`.tmp/q4_reference_quality_packages_20260809_run3/`。
 
 - 正式 scoring input：192 行、699 列，SHA256
   `7629a0d4c65ed4a39e5dbefe1748100238b92502ba32d834d04226e463d2781e`。
@@ -73,13 +86,38 @@ oracle_ceiling_manifest.json SHA-256
   `97c101e38631679739c03e7daa891696a10e5aaea4008de32b8fffeda276e933`。
 - 冻结模型 SHA256：`90be24067dbfd67d677b6d03ba7d3ce1f0b5613ed7fa2c55aebc4e829e9413de`。
 - 源 ZIP 内冻结 `s_result.csv` SHA256：
-  `2dfe7f29cbde9faf846e4a03be292a61eceb93469b199963c565bba2a8c37efe`。
+  `2dfe7f29cbde9faf846e4a03be292a61eceb93469b199963c565bba2a8c37efe`（Oracle，已作废）。
+
+SUB_A ZIP SHA256 为 `def9a256b569d4efc1ff5053d51c254cb2073b7f5bd4c7a8cb214e0c304ded83`；
+SUB_B ZIP SHA256 为 `0bc5cf66e8c5adbf2dece21452bbcd0710d6fb841c9dc45905a43f5411f64b08`。
+平台 A/B 状态为 `submitted=false`。**该 A/B 包基于 Oracle，禁止上传。**
+
+## 2026-08-09 Q5 合法参考质量 A/B 包（正式）
+
+实际运行目录：`results/raw/runs/experiments/q5_reference_quality_ab_20260809/`。运行只读取
+合法训练运行 `aggressive_r75_lgb20_20260802` 的冻结 ZIP/manifest、官方训练期生产数据和冻结
+模型；未读取 blind、平台答案或未来真实标签，未写入 `results/best`，也未上传。
+
+- 合法源 manifest：`candidate=aggressive_r75_lgb20`、`production_gate_passed=true`，
+  `leakage_passed=true`、`tests_passed=true`、`submission_valid=true`；leakage 收据
+  `cases_checked=250`、`failures=[]`（250/250 通过）；源 ZIP SHA256
+  `e03e70393087ec14e3a0288949980cb07cfa319685573840e62dd4b43b923452`，模型 SHA256
+  `90be24067dbfd67d677b6d03ba7d3ce1f0b5613ed7fa2c55aebc4e829e9413de`。以上均逐字节复核。
+- 正式 scoring input：192 行、703 列，SHA256
+  `8e654af88d819a597d1142198a7982c14c5a384e42a022f7fcdf3248a3d7473b`（源 ZIP 成员）。
+- 正式特征 API 重建 training input：11,521 行、703 列，SHA256
+  `97c101e38631679739c03e7daa891696a10e5aaea4008de32b8fffeda276e933`（与 Q4 记录一致）。
+- 冻结预测字节：`s_result.csv` SHA256
+  `e0f471d873d67c18949ae57e2ca6046938ed1a49a560bf54c11d5a646ba747b2`，五处
+  （源 ZIP 成员 / SUB_A 文件 / SUB_B 文件 / SUB_A ZIP 成员 / SUB_B ZIP 成员）逐字节相同。
+- manifest `hashes.result` 指向的 `submission/s_result.csv`（`e0a14a89…`）与冻结字节
+  数值一致（max_abs_diff 4.9996e-07），以 `reconciled_precision` 复核通过。
 
 | 本地机械量 | SUB_A Q_CAUSAL | SUB_B Q_REFERENCE |
 | --- | ---: | ---: |
 | `miss`：非有限单元 | 0 | 0 |
 | `dup`：重复时间戳 / 重复列 | 0 / 18 | 0 / 0 |
-| `out`：五口径 IQR / `abs(z)>3` | 2293 / 395 | 0 / 0 |
+| `out`：五口径 IQR / `abs(z)>3` | 2355 / 417 | 0 / 0 |
 | `intv`：非 15 分钟间隔 | 0 | 0 |
 | `invalid_col`：非法列 | 0 | 0 |
 | `feat`：`feat_` 字段 | 622 | 534 |
@@ -88,12 +126,13 @@ oracle_ceiling_manifest.json SHA-256
 SUB_B 写回重读的 schema、行数、时间轴和数值均一致；终态为 0 nonfinite、0 constant、
 0 duplicate、0 五口径 IQR outlier、0 `abs(z)>3` residual。Q_REFERENCE 收据确认
 `feeds_model=false`，Q_CAUSAL 输入在参考阶段前后 SHA256 均为
-`27fb44af8191979410ed2480f1ec8100d9ce840629ca86afcab3a2632f305e9b`。
+`790e870a3a694b0cb6c86a8f54da703b5f934cd47b423236b1d9894abccc37c8`。
 
-SUB_A ZIP SHA256 为 `def9a256b569d4efc1ff5053d51c254cb2073b7f5bd4c7a8cb214e0c304ded83`；
-SUB_B ZIP SHA256 为 `0bc5cf66e8c5adbf2dece21452bbcd0710d6fb841c9dc45905a43f5411f64b08`。
-源、A/B 文件及 A/B ZIP 解压成员共五处 `s_result.csv` SHA256 完全相同。平台 A/B 状态为
-`submitted=false`，质量与准确率分数均未填写；这些本地机械量不能推导平台 50/50。
+SUB_A ZIP SHA256 为 `bef842e352d4f903567511dd693432b4df1c92dcf56a87d5b37c61c6ed8a1c9c`；
+SUB_B ZIP SHA256 为 `a84c6700b6f6badd05fc8d4ad049411b09b3fe9fc29d7a1131f54ea45c2ba1c0`。
+平台 A/B 状态为 `submitted=false`、质量与准确率分数均为 `null`；全部收据（正式链未来扰动、
+Q_REFERENCE 只读、结果冻结五处一致、双 CSV 契约、哈希复核）通过，状态标记为
+`LEGAL_Q5_READY_FOR_PLATFORM`。已提供合法 Production Gate manifest；未上传、未推送。
 
 ## 2026-07-31 M1 共享逐行 OOF
 

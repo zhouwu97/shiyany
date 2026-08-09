@@ -13,6 +13,7 @@ from typing import Any
 from zipfile import ZipFile
 
 import joblib
+import numpy as np
 import pandas as pd
 
 
@@ -38,6 +39,15 @@ from gas_forecast.submission_quality import (  # noqa: E402
 from gas_forecast.workflow import resolve_prediction_feature_config  # noqa: E402
 
 
+FORBIDDEN_SOURCE_ARCHIVE_SHA256 = frozenset(
+    {"65039ac7fd38a23c75a76dcacff79b1230efee07ee201d35ce146c65c7ee1561"}
+)
+FORBIDDEN_RESULT_SHA256 = frozenset(
+    {"2dfe7f29cbde9faf846e4a03be292a61eceb93469b199963c565bba2a8c37efe"}
+)
+FORBIDDEN_CANDIDATES = frozenset({"future_row_reconstruction"})
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -50,7 +60,28 @@ def _parse_args() -> argparse.Namespace:
         "--source-zip",
         type=Path,
         required=True,
-        help="已合法提交的冻结预测 ZIP；只读取其中 s_result.csv",
+        help="通过 Production Gate 的冻结预测 ZIP；只读取其中 s_result.csv",
+    )
+    parser.add_argument(
+        "--prediction-manifest",
+        type=Path,
+        required=True,
+        help="与冻结预测 ZIP 配套、含文件哈希和 Production Gate 结论的 manifest.json",
+    )
+    parser.add_argument(
+        "--declared-result-file",
+        type=Path,
+        default=None,
+        help=(
+            "manifest hashes.result 指向的更高精度本地 s_result 副本；"
+            "只在冻结字节与 manifest 声明哈希不一致时用于数值复核",
+        ),
+    )
+    parser.add_argument(
+        "--experiment",
+        choices=("q4", "q5"),
+        default="q4",
+        help="q4 输出 LOCAL_AB_READY_...，q5 仅全部收据通过时输出 LEGAL_Q5_READY_FOR_PLATFORM",
     )
     parser.add_argument("--training-input", type=Path, help="独立训练期 input.csv")
     parser.add_argument(
@@ -100,6 +131,131 @@ def _read_submission_member(archive_path: Path, member: str) -> bytes:
         if names != list(SUBMISSION_MEMBERS):
             raise ValueError(f"正式 ZIP 成员不符合双 CSV 契约: {names}")
         return archive.read(member)
+
+
+def _result_bytes_frame(value: bytes) -> pd.DataFrame:
+    frame = pd.read_csv(io.BytesIO(value))
+    if frame.columns[0] != "datetime":
+        raise ValueError("s_result 首列必须为 datetime")
+    return frame
+
+
+def _numeric_equal(
+    left_bytes: bytes,
+    right_frame: pd.DataFrame,
+    *,
+    label: str,
+) -> dict[str, object]:
+    """逐 schema、时间轴与数值比较两个 s_result 字节表示。"""
+
+    left = _result_bytes_frame(left_bytes)
+    if list(left.columns) != list(right_frame.columns) or len(left) != len(right_frame):
+        raise ValueError(f"{label} 与冻结 s_result 的 schema 或行数不一致")
+    if not left["datetime"].equals(right_frame["datetime"]):
+        raise ValueError(f"{label} 与冻结 s_result 的时间轴不一致")
+    left_values = left.iloc[:, 1:].to_numpy(dtype=float)
+    right_values = right_frame.iloc[:, 1:].to_numpy(dtype=float)
+    if not np.isfinite(left_values).all() or not np.isfinite(right_values).all():
+        raise ValueError(f"{label} 或冻结 s_result 含非有限值")
+    maximum = float(np.max(np.abs(left_values - right_values))) if left_values.size else 0.0
+    # 平台冻结 CSV 允许 6 位小数；数值差应远小于内容级差异（量级预计 <1e-5）。
+    if not np.allclose(left_values, right_values, rtol=1e-6, atol=1e-4):
+        raise ValueError(f"{label} 与冻结 s_result 的数值不一致 (max_abs_diff={maximum})")
+    return {"max_abs_diff": maximum, "numeric_equal": True}
+
+
+def _validate_prediction_source(
+    manifest_path: Path,
+    *,
+    archive_sha256: str,
+    result_sha256: str,
+    frozen_result_bytes: bytes | None = None,
+    declared_result_file: Path | None = None,
+) -> dict[str, object]:
+    """拒绝 Oracle，并验证预测文件与 Production Gate manifest 一致。
+
+    manifest 的 ``hashes.submission`` 必须等于来源 ZIP 的 SHA256；``hashes.result``
+    默认也必须等于冻结 ``s_result`` 的 SHA256。部分运行目录会额外保存一份
+    ``hashes.result`` 指向的更高精度本地副本（字节与打包版不同但数值相同），
+    此时必须显式提供 ``declared_result_file`` 并在确认其 SHA256 等于 manifest
+    声明、且数值与冻结字节逐一相等后，才允许复用该冻结预测（不盲信文档）。
+    """
+
+    if archive_sha256 in FORBIDDEN_SOURCE_ARCHIVE_SHA256:
+        raise ValueError("预测源 ZIP 已登记为 future_row_reconstruction，禁止正式复用")
+    if result_sha256 in FORBIDDEN_RESULT_SHA256:
+        raise ValueError("冻结 s_result 已登记为 future_row_reconstruction，禁止重新封装")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"无法读取预测源 manifest: {manifest_path}") from exc
+    if not isinstance(manifest, dict):
+        raise ValueError("预测源 manifest 必须是 JSON 对象")
+
+    candidate = str(manifest.get("candidate", "")).strip().casefold()
+    oracle_flags = (
+        manifest.get("oracle_candidate") is True
+        or manifest.get("oracle_only") is True
+        or manifest.get("diagnostic_only") is True
+        or manifest.get("causal") is False
+        or manifest.get("formal_candidate") is False
+    )
+    if candidate in FORBIDDEN_CANDIDATES or oracle_flags:
+        raise ValueError(f"预测源 candidate={candidate or 'unknown'} 不是合法正式候选")
+
+    required_gates = (
+        "production_gate_passed",
+        "leakage_passed",
+        "tests_passed",
+        "submission_valid",
+    )
+    failed_gates = [name for name in required_gates if manifest.get(name) is not True]
+    if failed_gates:
+        raise ValueError(f"预测源未通过完整 Production Gate: {failed_gates}")
+
+    hashes = manifest.get("hashes")
+    if not isinstance(hashes, dict):
+        raise ValueError("预测源 manifest 缺少 hashes")
+    if hashes.get("submission") != archive_sha256:
+        raise ValueError("预测源 ZIP SHA256 与 manifest 不一致")
+    declared_result = hashes.get("result")
+    if not isinstance(declared_result, str) or len(declared_result) != 64:
+        raise ValueError("预测源 manifest 的 result 哈希必须是 64 位十六进制串")
+
+    result_verified: dict[str, object] = {"declared_sha256": declared_result}
+    if declared_result == result_sha256:
+        result_verified.update({"mode": "exact_byte", "sha256": result_sha256})
+    elif declared_result_file is not None and frozen_result_bytes is not None:
+        if not declared_result_file.is_file():
+            raise ValueError(f"预测源 result 复核对应用户文件不存在: {declared_result_file}")
+        if _sha256_file(declared_result_file) != declared_result:
+            raise ValueError("预测源 manifest 的 result 哈希与实际指定副本不一致")
+        declared_frame = _result_bytes_frame(declared_result_file.read_bytes())
+        result_verified.update(
+            {
+                "mode": "reconciled_precision",
+                "declared_file": str(declared_result_file.resolve()),
+                "sha256": result_sha256,
+                **{
+                    f"frozen_{k}": v
+                    for k, v in _numeric_equal(
+                        frozen_result_bytes, declared_frame, label="manifest 声明副本"
+                    ).items()
+                },
+            }
+        )
+    else:
+        raise ValueError("预测源 s_result SHA256 与 manifest 不一致且缺少可复核的声明副本")
+
+    return {
+        "manifest": str(manifest_path.resolve()),
+        "candidate": candidate,
+        "archive_sha256": archive_sha256,
+        "result_sha256": result_sha256,
+        "result_verified": result_verified,
+        "production_gate_verified": True,
+        "required_gates": {name: True for name in required_gates},
+    }
 
 
 def _materialize_scoring_input(source: Path, destination: Path) -> dict[str, object]:
@@ -251,12 +407,36 @@ def run_q4(
     source_zip: Path,
     run_dir: Path,
     *,
+    prediction_manifest: Path,
     training_input: Path | None = None,
     training_data_dir: Path | None = None,
     model_path: Path | None = None,
     train_end: str | None = None,
+    declared_result_file: Path | None = None,
+    experiment: str = "q4",
 ) -> dict[str, object]:
     """走正式 submission 链生成 A/B 包，并冻结全部比较证据。"""
+
+    experiment = experiment.casefold()
+
+    scoring_source = scoring_input.resolve()
+    source_archive = source_zip.resolve()
+    source_manifest = prediction_manifest.resolve()
+    for source in (scoring_source, source_archive, source_manifest):
+        if not source.is_file():
+            raise FileNotFoundError(f"Q4 来源文件不存在: {source}")
+    source_archive_before = _sha256_file(source_archive)
+    frozen_result_bytes = _read_submission_member(source_archive, "s_result.csv")
+    source_result_hash = _sha256_bytes(frozen_result_bytes)
+    provenance = _validate_prediction_source(
+        source_manifest,
+        archive_sha256=source_archive_before,
+        result_sha256=source_result_hash,
+        frozen_result_bytes=frozen_result_bytes,
+        declared_result_file=None
+        if declared_result_file is None
+        else declared_result_file.resolve(),
+    )
 
     output = run_dir.resolve()
     output.mkdir(parents=True, exist_ok=False)
@@ -265,12 +445,6 @@ def run_q4(
     receipt_root.mkdir()
     chain_dir.mkdir()
 
-    scoring_source = scoring_input.resolve()
-    source_archive = source_zip.resolve()
-    for source in (scoring_source, source_archive):
-        if not source.is_file():
-            raise FileNotFoundError(f"Q4 来源文件不存在: {source}")
-    source_archive_before = _sha256_file(source_archive)
     scoring_file = receipt_root / "source_scoring_input.csv"
     scoring_record = _materialize_scoring_input(scoring_source, scoring_file)
     scoring_hash_before = _sha256_file(scoring_file)
@@ -284,10 +458,8 @@ def run_q4(
     )
     training_hash_before = _sha256_file(training_file)
 
-    frozen_result_bytes = _read_submission_member(source_archive, "s_result.csv")
     frozen_result = receipt_root / "source_s_result.csv"
     frozen_result.write_bytes(frozen_result_bytes)
-    source_result_hash = _sha256_bytes(frozen_result_bytes)
 
     chain = prepare_submission_chain(
         training_file,
@@ -379,19 +551,18 @@ def run_q4(
     if any(final_quality.get(name) != expected for name, expected in expected_zeros.items()):
         raise ValueError(f"Q_REFERENCE 终态机械门禁失败: {final_quality}")
 
+    ready_status = (
+        "LEGAL_Q5_READY_FOR_PLATFORM"
+        if experiment == "q5"
+        else "LOCAL_AB_READY_PLATFORM_NOT_SUBMITTED"
+    )
     report: dict[str, Any] = {
-        "experiment": "Q4_reference_quality_ab",
-        "status": "LOCAL_AB_READY_PLATFORM_NOT_SUBMITTED",
+        "experiment": f"{experiment.upper()}_reference_quality_ab",
+        "status": ready_status,
         "prediction_provenance": {
+            **provenance,
             "source_zip": str(source_archive),
-            "source_zip_sha256": source_archive_before,
-            "s_result_sha256": source_result_hash,
-            "declared_model": "current_legally_submitted_frozen_result_not_a61",
-            "a61_production_s_result_available": False,
-            "reason": (
-                "仓库 A61 只有 development/verification OOF 且 formal_candidate=false；"
-                "复用已有合法提交且仓库记录平台准确率 49.9/50 的冻结预测"
-            ),
+            "reason": "预测源与通过 Production Gate 的 manifest 哈希一致，且不含 Oracle 标记",
         },
         "inputs": {
             "scoring": scoring_record,
@@ -450,7 +621,7 @@ def run_q4(
             "reason": "未获外部提交授权；本地机械指标不等同于平台计分",
         },
     }
-    _write_json(output / "q4_ab_report.json", report)
+    _write_json(output / f"{experiment}_ab_report.json", report)
     return report
 
 
@@ -460,10 +631,13 @@ def main() -> int:
         args.scoring_input,
         args.source_zip,
         args.run_dir,
+        prediction_manifest=args.prediction_manifest,
         training_input=args.training_input,
         training_data_dir=args.training_data_dir,
         model_path=args.model,
         train_end=args.train_end,
+        declared_result_file=args.declared_result_file,
+        experiment=args.experiment,
     )
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str, allow_nan=False))
     return 0
