@@ -77,7 +77,7 @@ def test_quality_policy_removes_invalid_raw_and_clips_registered_outlier() -> No
     assert report["audit"]["total_iqr_violations"] == 0
 
 
-def test_quality_policy_is_enforced_by_submission_archive(tmp_path: Path) -> None:
+def test_package_submission_only_encloses_prepared_quality_input(tmp_path: Path) -> None:
     policy = _policy()
     input_path = tmp_path / "input.csv"
     result_path = tmp_path / "s_result.csv"
@@ -90,6 +90,8 @@ def test_quality_policy_is_enforced_by_submission_archive(tmp_path: Path) -> Non
     with pytest.raises(ValueError, match="未登记原始字段"):
         validate_submission_input(raw, result, quality_policy=policy, enforce_quality=True)
 
+    prepared, quality_report = prepare_submission_input(raw, policy)
+    prepared.to_csv(input_path, index=False)
     summary = package_submission(
         input_path,
         result_path,
@@ -98,12 +100,11 @@ def test_quality_policy_is_enforced_by_submission_archive(tmp_path: Path) -> Non
     )
 
     assert summary["input_columns"] == 2
-    assert summary["quality_repair"]["repaired_cells"] == 1
+    assert quality_report["repaired_cells"] == 1
     archive = validate_submission_archive(
         archive_path,
         expected_input_path=input_path,
         expected_result_path=result_path,
-        quality_policy=policy,
     )
     assert archive["valid"] is True
 
