@@ -17,7 +17,7 @@ import json
 import shutil
 import zipfile
 from pathlib import Path
-from typing import Mapping
+from typing import Callable, Mapping, Protocol, Sequence
 
 import numpy as np
 import pandas as pd
@@ -31,6 +31,13 @@ Q_CAUSAL = "Q_CAUSAL"
 Q_REFERENCE = "Q_REFERENCE"
 CAUSAL_MODEL_INPUT_RECEIPT = "causal_model_input_receipt.json"
 SUBMISSION_QUALITY_RECEIPT = "submission_quality_receipt.json"
+
+
+class OriginSubmissionPredictor(Protocol):
+    """正式提交允许的唯一模型推理协议。"""
+
+    def predict_at_origin(self, history_until_origin: pd.DataFrame) -> pd.DataFrame:
+        """仅使用当前 origin 及其历史，返回当前 origin 的一行宽表预测。"""
 
 
 def sha256_file(path: str | Path) -> str:
@@ -177,34 +184,104 @@ def fit_causal_quality_policy(
     *,
     train_end: str | pd.Timestamp | None = None,
 ) -> object:
-    """适配 Q1 的训练期质量策略拟合接口，明确标记为 :data:`Q_CAUSAL`。
+    """调用 Q1 的显式训练期策略拟合接口。"""
 
-    这里绝不以评分输入替代训练输入。若 Q1 后续提供更明确的
-    ``fit_causal_quality_policy``，优先调用；当前接口退化为其公开的
-    ``fit_quality_policy``，避免复制或重实现 Q1 算法。
-    """
-
-    fitter = getattr(quality_api, "fit_causal_quality_policy", None)
-    if not callable(fitter):
-        fitter = getattr(quality_api, "fit_quality_policy", None)
-    if not callable(fitter):
-        raise RuntimeError("缺少 Q1 质量策略拟合接口 fit_quality_policy")
-    return fitter(training_frame, policy=policy, train_end=train_end)
+    return quality_api.fit_causal_quality_policy(
+        training_frame,
+        policy=policy,
+        train_end=train_end,
+    )
 
 
 def _transform_causal_model_input(
     scoring_origin_rows: pd.DataFrame,
     fitted_policy: object,
 ) -> tuple[pd.DataFrame, dict[str, object]]:
-    transformer = getattr(quality_api, "transform_causal_model_input", None)
-    if not callable(transformer):
-        transformer = getattr(quality_api, "transform_submission_input", None)
-    if not callable(transformer):
-        raise RuntimeError("缺少 Q1 评分期质量变换接口 transform_submission_input")
-    transformed, report = transformer(scoring_origin_rows, fitted_policy)
+    transformed, report = quality_api.transform_causal_model_input(
+        scoring_origin_rows,
+        fitted_policy,
+    )
     if not isinstance(transformed, pd.DataFrame) or not isinstance(report, dict):
         raise TypeError("Q1 评分期质量变换必须返回 (DataFrame, dict)")
     return transformed, report
+
+
+def _quality_future_feature_groups(frame: pd.DataFrame) -> dict[str, list[str]]:
+    """按统一口径列出 Q_CAUSAL 需要隔离的未来字段组。"""
+
+    numeric = [
+        str(column)
+        for column in frame.columns
+        if column != "datetime" and pd.api.types.is_numeric_dtype(frame[column])
+    ]
+    groups: dict[str, list[str]] = {
+        "generator": [],
+        "gas": [],
+        "holder": [],
+        "users": [],
+        "all_features": numeric,
+    }
+    for column in numeric:
+        name = column.casefold()
+        if name.startswith("generator"):
+            groups["generator"].append(column)
+        if any(token in name for token in ("gas", "blast_furnace", "coke", "converter")):
+            groups["gas"].append(column)
+        if "holder" in name:
+            groups["holder"].append(column)
+        if any(token in name for token in ("user", "air_heater", "demand", "mixed")):
+            groups["users"].append(column)
+    return groups
+
+
+def _quality_gate_origins(scoring_origin_rows: pd.DataFrame) -> list[int]:
+    """选取仍有未来行的稳定 origin 位置，避免只审计尾行。"""
+
+    if len(scoring_origin_rows) < 2:
+        return []
+    positions = {0, (len(scoring_origin_rows) - 2) // 2, len(scoring_origin_rows) - 2}
+    return sorted(positions)
+
+
+def _quality_prefix_equal(left: pd.DataFrame, right: pd.DataFrame) -> tuple[bool, float | None, str | None]:
+    """以严格 schema、时间轴和 bitwise 数值比较 Q_CAUSAL 前缀。"""
+
+    if list(left.columns) != list(right.columns) or len(left) != len(right):
+        return False, None, "模型输入 schema 或行数发生变化"
+    if not left["datetime"].equals(right["datetime"]):
+        return False, None, "模型输入时间轴发生变化"
+    try:
+        baseline = left.iloc[:, 1:].to_numpy(dtype=float)
+        candidate = right.iloc[:, 1:].to_numpy(dtype=float)
+    except (TypeError, ValueError):
+        return False, None, "模型输入不是纯数值"
+    if not np.isfinite(baseline).all() or not np.isfinite(candidate).all():
+        return False, None, "模型输入包含 NaN/Inf"
+    maximum = float(np.max(np.abs(baseline - candidate))) if baseline.size else 0.0
+    return bool(np.array_equal(baseline, candidate)), maximum, None
+
+
+def _quality_future_variant(
+    scoring_origin_rows: pd.DataFrame,
+    *,
+    origin_position: int,
+    columns: Sequence[str],
+    operation: str,
+) -> pd.DataFrame:
+    """只修改指定 origin 后的质量输入，不改变当期及此前任何单元格。"""
+
+    future_index = scoring_origin_rows.index[origin_position + 1 :]
+    if operation == "delete" and columns == _quality_future_feature_groups(scoring_origin_rows)["all_features"]:
+        return scoring_origin_rows.iloc[: origin_position + 1].copy(deep=True)
+    result = scoring_origin_rows.copy(deep=True)
+    if operation == "perturb":
+        for position, column in enumerate(columns):
+            result.loc[future_index, column] = float(-9_999_991 - position)
+    elif operation == "delete":
+        result.loc[future_index, list(columns)] = np.nan
+    else:
+        raise ValueError(f"不支持的 Q_CAUSAL 未来扰动操作: {operation}")
+    return result
 
 
 def _future_perturbation_receipt(
@@ -212,32 +289,86 @@ def _future_perturbation_receipt(
     fitted_policy: object,
     baseline: pd.DataFrame,
 ) -> dict[str, object]:
-    """真实扰动最后一个 origin，确认此前输入不依赖评分期未来行。"""
+    """证明 Q_CAUSAL 的每个 origin 输入不读取后续评分块。"""
 
-    if len(scoring_origin_rows) < 2:
+    groups = _quality_future_feature_groups(scoring_origin_rows)
+    positions = _quality_gate_origins(scoring_origin_rows)
+    if not positions:
         return {
+            "gate": "q_causal_future_perturbation_v2",
             "passed": True,
-            "checked_prefix_rows": 0,
+            "origins": [],
+            "groups": groups,
+            "operations": ["perturb", "delete"],
+            "max_abs_diff": 0.0,
+            "cases": [],
             "method": "单行评分输入无可扰动的未来 origin；变换只读取冻结训练统计",
         }
 
-    perturbed = scoring_origin_rows.copy(deep=True)
-    for position, column in enumerate(perturbed.columns):
-        if column == "datetime":
-            continue
-        # 使用列序号构造有限值，避免未来行的 NaN/极端值触发偶然的同值路径。
-        perturbed.iat[len(perturbed) - 1, position] = float(10_000_000 + position)
-    changed, _ = _transform_causal_model_input(perturbed, fitted_policy)
-    _assert_same_frame(
-        baseline.iloc[:-1].reset_index(drop=True),
-        changed.iloc[:-1].reset_index(drop=True),
-        label="未来扰动前缀模型输入",
-    )
+    cases: list[dict[str, object]] = []
+    passed = True
+    maximum = 0.0
+    for origin_position in positions:
+        origin = str(scoring_origin_rows["datetime"].iloc[origin_position])
+        expected_prefix = baseline.iloc[: origin_position + 1].reset_index(drop=True)
+        for group, columns in groups.items():
+            for operation in ("perturb", "delete"):
+                if not columns:
+                    cases.append(
+                        {
+                            "origin": origin,
+                            "group": group,
+                            "operation": operation,
+                            "passed": True,
+                            "skipped": True,
+                            "bitwise_identical": True,
+                            "max_abs_diff": 0.0,
+                            "reason": "输入不存在该类别的数值字段",
+                        }
+                    )
+                    continue
+                try:
+                    variant = _quality_future_variant(
+                        scoring_origin_rows,
+                        origin_position=origin_position,
+                        columns=columns,
+                        operation=operation,
+                    )
+                    transformed, _ = _transform_causal_model_input(variant, fitted_policy)
+                    observed_prefix = transformed.iloc[: origin_position + 1].reset_index(drop=True)
+                    identical, difference, reason = _quality_prefix_equal(
+                        expected_prefix,
+                        observed_prefix,
+                    )
+                except Exception as error:  # 质量因果门禁必须留下失败原因。
+                    identical, difference, reason = (
+                        False,
+                        None,
+                        f"{type(error).__name__}: {error}",
+                    )
+                passed = passed and identical
+                if difference is not None:
+                    maximum = max(maximum, difference)
+                cases.append(
+                    {
+                        "origin": origin,
+                        "group": group,
+                        "operation": operation,
+                        "passed": identical,
+                        "bitwise_identical": identical,
+                        "max_abs_diff": difference,
+                        "reason": reason,
+                    }
+                )
     return {
-        "passed": True,
-        "checked_prefix_rows": int(len(scoring_origin_rows) - 1),
-        "perturbed_origin": str(scoring_origin_rows["datetime"].iloc[-1]),
-        "method": "改变最后一个 origin 的全部数值后，所有此前 origin 的模型输入逐值不变",
+        "gate": "q_causal_future_perturbation_v2",
+        "passed": passed,
+        "origins": [str(scoring_origin_rows["datetime"].iloc[position]) for position in positions],
+        "groups": groups,
+        "operations": ["perturb", "delete"],
+        "max_abs_diff": maximum,
+        "cases": cases,
+        "method": "分别扰动或删除 origin 后五类字段，比较全部此前 Q_CAUSAL 输入",
     }
 
 
@@ -255,6 +386,8 @@ def prepare_causal_model_input(
     input_summary = _validate_model_input_frame(transformed, label="Q_CAUSAL 模型输入")
     frozen_policy = _fitted_policy_dict(fitted_policy)
     future_check = _future_perturbation_receipt(scoring_origin_rows, fitted_policy, transformed)
+    if future_check.get("passed") is not True:
+        raise ValueError("Q_CAUSAL 未来扰动门禁失败，禁止继续生成模型输入")
     frozen_policy_sha256 = _sha256_bytes(
         json.dumps(
             frozen_policy,
@@ -270,6 +403,7 @@ def prepare_causal_model_input(
         "purpose": "模型逐 origin 输入；仅使用训练期冻结统计",
         "training_statistics_frozen": True,
         "future_values_can_influence_policy": False,
+        "q_reference_available_during_model_input": False,
         "fitted_policy": frozen_policy,
         "fitted_policy_sha256": frozen_policy_sha256,
         "transform_report": transform_report,
@@ -290,12 +424,10 @@ def prepare_reference_submission_input(
     Q1 提供；本模块只负责职责边界和收据。
     """
 
-    normalizer = getattr(quality_api, "prepare_reference_submission_input", None)
-    if not callable(normalizer):
-        normalizer = getattr(quality_api, "prepare_full_matrix_submission_input", None)
-    if not callable(normalizer):
-        raise RuntimeError("缺少 Q1 参考全矩阵归一化接口")
-    normalized, report = normalizer(causal_model_input.copy(deep=True), policy=policy)
+    normalized, report = quality_api.prepare_reference_submission_input(
+        causal_model_input.copy(deep=True),
+        policy=policy,
+    )
     if not isinstance(normalized, pd.DataFrame) or not isinstance(report, dict):
         raise TypeError("Q1 参考归一化必须返回 (DataFrame, dict)")
     _validate_model_input_frame(normalized, label="Q_REFERENCE 提交输入")
@@ -309,6 +441,48 @@ def expected_prediction_columns(config: ForecastConfig | None = None) -> list[st
         for target in config.targets
         for horizon in config.feature.horizons
     ]
+
+
+def predict_submission_by_origin(
+    causal_model_input: pd.DataFrame,
+    predictor: OriginSubmissionPredictor,
+    *,
+    config: ForecastConfig | None = None,
+) -> pd.DataFrame:
+    """逐 origin 从冻结 Q_CAUSAL 输入生成合法 ``s_result``。
+
+    此入口故意不接收整段 ``scoring_frame`` 的批量推理方法。每次调用都仅把
+    截至当前 origin 的前缀交给预测器，并要求其只返回一个同 origin 的宽表。
+    这样结果文件的生成顺序可以由收据和测试共同审计。
+    """
+
+    if not callable(getattr(predictor, "predict_at_origin", None)):
+        raise TypeError("正式提交预测器必须提供 predict_at_origin(history_until_origin)")
+    _validate_model_input_frame(causal_model_input, label="逐 origin Q_CAUSAL 输入")
+    indexed = causal_model_input.copy(deep=True)
+    indexed["datetime"] = pd.to_datetime(indexed["datetime"], errors="raise")
+    indexed = indexed.set_index("datetime", drop=True)
+    expected = expected_prediction_columns(config)
+    results: list[pd.DataFrame] = []
+    for origin in indexed.index:
+        history = indexed.loc[:origin].copy(deep=True)
+        predicted = predictor.predict_at_origin(history)
+        if not isinstance(predicted, pd.DataFrame):
+            raise TypeError("predict_at_origin 必须返回 pandas.DataFrame")
+        if len(predicted) != 1 or not isinstance(predicted.index, pd.DatetimeIndex):
+            raise ValueError("predict_at_origin 必须返回带 DatetimeIndex 的单行宽表")
+        if pd.Timestamp(predicted.index[0]) != pd.Timestamp(origin):
+            raise ValueError("predict_at_origin 返回的 origin 与输入历史末端不一致")
+        if list(predicted.columns) != expected:
+            raise ValueError("predict_at_origin 返回的预测字段或顺序不合法")
+        values = predicted.to_numpy(dtype=float)
+        if not np.isfinite(values).all():
+            raise ValueError("predict_at_origin 返回 NaN/Inf")
+        result = predicted.copy(deep=True).reset_index(names="datetime")
+        results.append(result)
+    combined = pd.concat(results, ignore_index=True)
+    validate_submission_frame(combined, config)
+    return combined
 
 
 def validate_submission_frame(
@@ -450,6 +624,8 @@ def validate_causal_model_input_receipt(
         raise ValueError("因果模型输入收据未声明训练统计已冻结")
     if payload.get("future_values_can_influence_policy") is not False:
         raise ValueError("因果模型输入收据未证明未来值不能影响策略")
+    if payload.get("q_reference_available_during_model_input") is not False:
+        raise ValueError("因果模型输入收据未证明 Q_REFERENCE 不参与模型输入")
     frozen_policy = payload.get("fitted_policy")
     frozen_policy_sha256 = payload.get("fitted_policy_sha256")
     if not isinstance(frozen_policy, dict) or not isinstance(frozen_policy_sha256, str):
@@ -466,7 +642,12 @@ def validate_causal_model_input_receipt(
     if actual_policy_sha256 != frozen_policy_sha256:
         raise ValueError("因果模型输入收据中的冻结策略哈希不一致")
     future_check = payload.get("future_perturbation")
-    if not isinstance(future_check, dict) or future_check.get("passed") is not True:
+    if (
+        not isinstance(future_check, dict)
+        or future_check.get("gate") != "q_causal_future_perturbation_v2"
+        or future_check.get("passed") is not True
+        or future_check.get("max_abs_diff") != 0.0
+    ):
         raise ValueError("因果模型输入收据缺少通过的未来扰动复核")
     files = payload.get("files")
     if not isinstance(files, dict) or not isinstance(files.get("causal_model_input"), dict):
@@ -496,11 +677,16 @@ def _write_reference_submission(
     input_name: str,
     result_name: str,
     quality_receipt_name: str,
+    prediction_input: Mapping[str, object],
 ) -> dict[str, object]:
     """执行冻结后的 Q_REFERENCE、副本写盘及 read-back 复检。"""
 
     _, causal_input = _read_utf8_csv(causal_input_path, label="Q_CAUSAL 模型输入")
     causal_summary = _validate_model_input_frame(causal_input, label="Q_CAUSAL 模型输入")
+    causal_before_reference = _file_record(
+        causal_input_path,
+        relative_path=causal_input_path.name,
+    )
     source_result_bytes, source_result = _read_utf8_csv(result_source_path, label="s_result.csv")
     result_validation = validate_submission_frame(source_result)
     validate_submission_input(causal_input, source_result)
@@ -526,6 +712,12 @@ def _write_reference_submission(
     result_freeze_check = verify_submission_result_freeze(result_destination, result_freeze)
     if result_bytes != source_result_bytes:
         raise ValueError("Q_REFERENCE 阶段改变了 s_result.csv 的原始字节")
+    causal_after_reference = _file_record(
+        causal_input_path,
+        relative_path=causal_input_path.name,
+    )
+    if causal_after_reference != causal_before_reference:
+        raise ValueError("Q_REFERENCE 阶段改写了冻结 Q_CAUSAL 模型输入")
 
     quality_receipt: dict[str, object] = {
         "receipt_version": 1,
@@ -545,6 +737,12 @@ def _write_reference_submission(
                     default=_json_default,
                 ).encode("utf-8")
             ),
+        },
+        "prediction_input": dict(prediction_input),
+        "causal_input_immutable_after_prediction": {
+            "passed": True,
+            "before_reference": causal_before_reference,
+            "after_reference": causal_after_reference,
         },
         "s_result_freeze": {
             **result_freeze,
@@ -609,8 +807,17 @@ def prepare_submission_chain(
     result_name: str = "s_result.csv",
     causal_receipt_name: str = CAUSAL_MODEL_INPUT_RECEIPT,
     quality_receipt_name: str = SUBMISSION_QUALITY_RECEIPT,
+    prediction_builder: Callable[[pd.DataFrame], pd.DataFrame] | None = None,
+    prediction_evidence: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    """执行正式链：训练统计冻结 → 因果输入 → 结果冻结 → 参考副本。"""
+    """执行提交链：训练统计冻结 → 因果输入 → 结果冻结 → 参考副本。
+
+    传入 ``prediction_builder`` 时，该回调只能接收已落盘的 ``Q_CAUSAL``
+    输入副本，并且必须返回合法的 ``s_result`` 宽表。这是正式新链路：
+    ``training → Q_CAUSAL → per-origin model input → result freeze → Q_REFERENCE``。
+    未传回调时保留既有已生成结果的兼容入口，但收据会明确标记为旧外部结果，
+    不能据此证明模型预测使用了 ``Q_CAUSAL`` 输入。
+    """
 
     training_path = Path(training_input_path)
     scoring_path = Path(scoring_input_path)
@@ -654,6 +861,35 @@ def prepare_submission_chain(
     _write_json(causal_receipt_path, causal_receipt)
     validate_causal_model_input_receipt(causal_input_path, causal_receipt)
 
+    prediction_input: dict[str, object] = {
+        "causal_model_input": _file_record(
+            causal_input_path,
+            relative_path=causal_input_path.name,
+        ),
+        "q_reference_available_during_prediction": False,
+    }
+    if prediction_builder is not None:
+        generated = prediction_builder(read_back_causal.copy(deep=True))
+        if not isinstance(generated, pd.DataFrame):
+            raise TypeError("prediction_builder 必须返回 pandas.DataFrame")
+        validate_submission_frame(generated)
+        _write_csv(generated, source_result_path)
+        prediction_input.update(
+            {
+                "generated_after_q_causal": True,
+                "builder": getattr(prediction_builder, "__qualname__", type(prediction_builder).__name__),
+            }
+        )
+        if prediction_evidence is not None:
+            prediction_input.update(dict(prediction_evidence))
+    else:
+        prediction_input.update(
+            {
+                "generated_after_q_causal": False,
+                "reason": "兼容旧入口：结果由外部预先生成，未声明 Q_CAUSAL 模型输入证明",
+            }
+        )
+
     reference = _write_reference_submission(
         causal_input_path=causal_input_path,
         causal_receipt=causal_receipt,
@@ -663,6 +899,7 @@ def prepare_submission_chain(
         input_name=input_name,
         result_name=result_name,
         quality_receipt_name=quality_receipt_name,
+        prediction_input=prediction_input,
     )
     return {
         "causal_input_path": causal_input_path,
@@ -670,6 +907,119 @@ def prepare_submission_chain(
         "causal_receipt": causal_receipt,
         **reference,
     }
+
+
+def prepare_submission_chain_with_predictor(
+    training_input_path: str | Path,
+    scoring_input_path: str | Path,
+    output_dir: str | Path,
+    *,
+    prediction_builder: Callable[[pd.DataFrame], pd.DataFrame],
+    train_end: str | pd.Timestamp | None = None,
+    policy: SubmissionQualityPolicy = COMPETITION_QUALITY_POLICY,
+    causal_input_name: str = "causal_model_input.csv",
+    input_name: str = "input.csv",
+    result_name: str = "s_result.csv",
+    causal_receipt_name: str = CAUSAL_MODEL_INPUT_RECEIPT,
+    quality_receipt_name: str = SUBMISSION_QUALITY_RECEIPT,
+) -> dict[str, object]:
+    """执行强制 ``Q_CAUSAL`` 先于模型预测的正式提交链。
+
+    与兼容入口不同，此函数没有预生成 ``result_path``：结果只能由回调在
+    ``Q_REFERENCE`` 尚未出现时创建。它适合新的逐 origin 预测器接入正式
+    冻结与 ZIP 流程。
+    """
+
+    destination = Path(output_dir)
+    raw_result = destination / "causal_model_s_result.csv"
+    stale_reference = [
+        path
+        for path in (destination / input_name, destination / quality_receipt_name)
+        if path.exists()
+    ]
+    if stale_reference:
+        raise FileExistsError(
+            f"正式预测前发现已有 Q_REFERENCE 工件，拒绝其回流: {stale_reference}"
+        )
+    return prepare_submission_chain(
+        training_input_path,
+        scoring_input_path,
+        raw_result,
+        destination,
+        train_end=train_end,
+        policy=policy,
+        causal_input_name=causal_input_name,
+        input_name=input_name,
+        result_name=result_name,
+        causal_receipt_name=causal_receipt_name,
+        quality_receipt_name=quality_receipt_name,
+        prediction_builder=prediction_builder,
+    )
+
+
+def prepare_submission_chain_with_origin_predictor(
+    training_input_path: str | Path,
+    scoring_input_path: str | Path,
+    output_dir: str | Path,
+    *,
+    predictor: OriginSubmissionPredictor,
+    train_end: str | pd.Timestamp | None = None,
+    policy: SubmissionQualityPolicy = COMPETITION_QUALITY_POLICY,
+    config: ForecastConfig | None = None,
+    causal_input_name: str = "causal_model_input.csv",
+    input_name: str = "input.csv",
+    result_name: str = "s_result.csv",
+    causal_receipt_name: str = CAUSAL_MODEL_INPUT_RECEIPT,
+    quality_receipt_name: str = SUBMISSION_QUALITY_RECEIPT,
+) -> dict[str, object]:
+    """执行强制逐 origin 推理的完整正式提交链。
+
+    这是新代码应使用的入口：训练期拟合一次 Q_CAUSAL，随后每个评分 origin
+    仅传入历史前缀给 ``predict_at_origin``，在结果合法且 SHA256 冻结后才
+    生成 Q_REFERENCE ``input.csv``。已有外部结果的兼容入口不具备这条证明。
+    """
+
+    if not callable(getattr(predictor, "predict_at_origin", None)):
+        raise TypeError("正式提交预测器必须提供 predict_at_origin(history_until_origin)")
+
+    evidence: dict[str, object] = {
+        "origin_only_predictor": True,
+        "prediction_protocol": "predict_at_origin(history_until_origin)",
+        "prediction_origin_count": 0,
+        "predictor": type(predictor).__name__,
+    }
+
+    def origin_only_builder(causal_input: pd.DataFrame) -> pd.DataFrame:
+        result = predict_submission_by_origin(causal_input, predictor, config=config)
+        evidence["prediction_origin_count"] = int(len(result))
+        return result
+
+    destination = Path(output_dir)
+    raw_result = destination / "causal_model_s_result.csv"
+    stale_reference = [
+        path
+        for path in (destination / input_name, destination / quality_receipt_name, raw_result)
+        if path.exists()
+    ]
+    if stale_reference:
+        raise FileExistsError(
+            f"正式逐 origin 预测前发现已有工件，拒绝覆盖或读取: {stale_reference}"
+        )
+    return prepare_submission_chain(
+        training_input_path,
+        scoring_input_path,
+        raw_result,
+        destination,
+        train_end=train_end,
+        policy=policy,
+        causal_input_name=causal_input_name,
+        input_name=input_name,
+        result_name=result_name,
+        causal_receipt_name=causal_receipt_name,
+        quality_receipt_name=quality_receipt_name,
+        prediction_builder=origin_only_builder,
+        prediction_evidence=evidence,
+    )
 
 
 def prepare_submission_from_frozen_causal_input(
@@ -706,6 +1056,15 @@ def prepare_submission_from_frozen_causal_input(
         input_name=input_name,
         result_name=result_name,
         quality_receipt_name=quality_receipt_name,
+        prediction_input={
+            "causal_model_input": _file_record(
+                destination_causal_path,
+                relative_path=destination_causal_path.name,
+            ),
+            "generated_after_q_causal": False,
+            "q_reference_available_during_prediction": False,
+            "reason": "复用冻结 Q_CAUSAL 输入；不重新拟合或重新预测",
+        },
     )
     return {
         "causal_input_path": destination_causal_path,
@@ -727,6 +1086,35 @@ def validate_submission_quality_receipt(
         raise ValueError("提交质量收据的 quality_mode 必须为 Q_REFERENCE")
     if payload.get("reference_only") is not True or payload.get("feeds_model") is not False:
         raise ValueError("提交质量收据未声明参考归一化与模型输入职责隔离")
+    prediction_input = payload.get("prediction_input")
+    if not isinstance(prediction_input, dict):
+        raise ValueError("提交质量收据缺少预测输入链路记录")
+    if prediction_input.get("q_reference_available_during_prediction") is not False:
+        raise ValueError("预测输入链路未证明 Q_REFERENCE 不回流模型")
+    if prediction_input.get("origin_only_predictor") is True:
+        if prediction_input.get("prediction_protocol") != "predict_at_origin(history_until_origin)":
+            raise ValueError("逐 origin 预测收据缺少固定协议声明")
+        origin_count = prediction_input.get("prediction_origin_count")
+        if not isinstance(origin_count, int) or origin_count <= 0:
+            raise ValueError("逐 origin 预测收据缺少有效 origin 数")
+    causal_record = payload.get("causal_model_input")
+    prediction_causal = prediction_input.get("causal_model_input")
+    if not isinstance(causal_record, dict) or not isinstance(prediction_causal, dict):
+        raise ValueError("提交质量收据缺少 Q_CAUSAL 输入哈希关联")
+    if causal_record.get("sha256") != prediction_causal.get("sha256"):
+        raise ValueError("预测输入与 Q_CAUSAL 收据哈希不一致")
+    causal_immutable = payload.get("causal_input_immutable_after_prediction")
+    if not isinstance(causal_immutable, dict) or causal_immutable.get("passed") is not True:
+        raise ValueError("提交质量收据未证明 Q_REFERENCE 未改写 Q_CAUSAL 输入")
+    before_reference = causal_immutable.get("before_reference")
+    after_reference = causal_immutable.get("after_reference")
+    if (
+        not isinstance(before_reference, dict)
+        or not isinstance(after_reference, dict)
+        or before_reference.get("sha256") != causal_record.get("sha256")
+        or after_reference.get("sha256") != causal_record.get("sha256")
+    ):
+        raise ValueError("提交质量收据中的 Q_CAUSAL 不可变哈希不一致")
     final_files = payload.get("final_files")
     if not isinstance(final_files, dict):
         raise ValueError("提交质量收据缺少 final_files")

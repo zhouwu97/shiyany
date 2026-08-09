@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import gas_forecast.submission_quality as quality_module
 from gas_forecast.submission import (
     expected_prediction_columns,
     package_submission,
@@ -153,6 +154,32 @@ def test_full_matrix_quality_winsorizes_derived_features() -> None:
     assert report["winsorized_cells"] >= 1
     assert report["final_quality"]["iqr_outlier_cells_all_methods"] == 0
     assert report["production_eligible"] is False
+
+
+def test_reference_normalization_never_refits_or_transforms_causal_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Q_REFERENCE 只读取冻结副本，不能隐式回到 Q_CAUSAL 拟合路径。"""
+
+    source = _input_frame().drop(columns="air_heater_5")
+    source["feat_constant"] = 1.0
+
+    def fail_if_causal_called(*_args, **_kwargs):
+        raise AssertionError("Q_REFERENCE 不得拟合或变换 Q_CAUSAL 策略")
+
+    monkeypatch.setattr(quality_module, "fit_quality_policy", fail_if_causal_called)
+    monkeypatch.setattr(quality_module, "transform_submission_input", fail_if_causal_called)
+    normalized, report = quality_module.prepare_reference_submission_input(source, _policy())
+    legacy_normalized, legacy_report = quality_module.prepare_full_matrix_submission_input(
+        source,
+        _policy(),
+    )
+
+    assert "feat_constant" not in normalized.columns
+    assert report["mode"] == Q_REFERENCE
+    assert report["production_eligible"] is False
+    pd.testing.assert_frame_equal(normalized, legacy_normalized)
+    assert legacy_report["base_quality"] is None
 
 
 def test_fitted_quality_is_unchanged_by_scoring_tail_perturbation() -> None:

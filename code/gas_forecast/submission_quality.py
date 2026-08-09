@@ -183,18 +183,6 @@ COMPETITION_QUALITY_POLICY = SubmissionQualityPolicy(
 
 
 @dataclass(frozen=True)
-class IQRRepair:
-    """单个原始字段的批次 IQR 裁剪收据。"""
-
-    column: str
-    lower: float | None
-    upper: float | None
-    repaired_cells: int
-    skipped: bool
-    passes: int = 0
-
-
-@dataclass(frozen=True)
 class FrozenColumnQuality:
     """训练期冻结的单列质量统计，不在评分期重新估计。"""
 
@@ -724,6 +712,32 @@ def transform_submission_input(
         "audit": audit,
     }
     return output, report
+
+
+def fit_causal_quality_policy(
+    training_frame: pd.DataFrame,
+    policy: SubmissionQualityPolicy = COMPETITION_QUALITY_POLICY,
+    *,
+    train_end: str | pd.Timestamp | None = None,
+) -> FittedSubmissionQualityPolicy:
+    """正式 ``Q_CAUSAL`` 拟合入口。
+
+    保留 ``fit_quality_policy`` 作为兼容名称，但正式提交链通过这个显式名称
+    表达“训练期拟合一次、评分期只变换”的职责边界。
+    """
+
+    return fit_quality_policy(training_frame, policy=policy, train_end=train_end)
+
+
+def transform_causal_model_input(
+    scoring_origin_rows: pd.DataFrame,
+    fitted_policy: FittedSubmissionQualityPolicy,
+    *,
+    strict: bool = True,
+) -> tuple[pd.DataFrame, dict[str, object]]:
+    """正式 ``Q_CAUSAL`` 评分输入变换入口，不会重新估计统计量。"""
+
+    return transform_submission_input(scoring_origin_rows, fitted_policy, strict=strict)
 
 
 def _hampel_replacement(
@@ -1326,6 +1340,27 @@ def normalize_submission_input_frame(
     return normalized, report
 
 
+def prepare_reference_submission_input(
+    causal_model_input: pd.DataFrame,
+    policy: SubmissionQualityPolicy = COMPETITION_QUALITY_POLICY,
+    *,
+    settings: ReferenceNormalizationSettings | Mapping[str, Any] | None = None,
+) -> tuple[pd.DataFrame, dict[str, object]]:
+    """对已冻结的 ``Q_CAUSAL`` 输入创建 ``Q_REFERENCE`` 提交副本。
+
+    ``policy`` 仅为旧调用方保留形参，绝不能在这里调用
+    :func:`fit_quality_policy` 或 :func:`transform_submission_input`。参考阶段
+    允许读取完整提交矩阵，但输出只用于 ``input.csv``，不会回流模型预测。
+    """
+
+    del policy
+    normalized, report = normalize_submission_input_frame(causal_model_input, settings)
+    report = dict(report)
+    report["production_eligible"] = False
+    report["reason"] = "Q_REFERENCE 仅归一化冻结输入副本，不拟合或改写模型输入"
+    return normalized, report
+
+
 def audit_submission_quality(
     input_frame: pd.DataFrame,
     policy: SubmissionQualityPolicy = COMPETITION_QUALITY_POLICY,
@@ -1418,273 +1453,6 @@ def prepare_submission_input(
     return output, report
 
 
-def _prepare_submission_input_legacy_batch(
-    input_frame: pd.DataFrame,
-    policy: SubmissionQualityPolicy,
-    *,
-    strict: bool,
-) -> tuple[pd.DataFrame, dict[str, object]]:
-    """保留历史批次算法，仅供旧报告复现；正式入口不再使用。"""
-
-    original_raw = raw_columns(input_frame)
-    allowed = set(policy.allowed_raw_columns)
-    retained_columns = [
-        str(column)
-        for column in input_frame.columns
-        if column == "datetime" or str(column).startswith("feat_") or str(column) in allowed
-    ]
-    output = input_frame.loc[:, retained_columns].copy()
-    repairs: list[IQRRepair] = []
-
-    for column in policy.batch_iqr_clip_columns:
-        if column not in output.columns:
-            continue
-        changed_any = pd.Series(False, index=output.index)
-        lower: float | None = None
-        upper: float | None = None
-        passes = 0
-        for _ in range(8):
-            bounds = _iqr_bounds(output[column], policy)
-            if bounds is None:
-                break
-            lower, upper = bounds
-            numeric = pd.to_numeric(output[column], errors="coerce")
-            clipped = numeric.clip(lower=lower, upper=upper)
-            changed = numeric.notna() & ~np.isclose(
-                numeric.to_numpy(dtype=float),
-                clipped.to_numpy(dtype=float),
-                rtol=1e-12,
-                atol=1e-12,
-            )
-            passes += 1
-            output[column] = clipped
-            changed_any |= changed
-            if not bool(changed.any()):
-                break
-        if lower is None or upper is None:
-            repairs.append(IQRRepair(column, None, None, 0, True, passes))
-        else:
-            repairs.append(
-                IQRRepair(
-                    column,
-                    lower,
-                    upper,
-                    int(changed_any.sum()),
-                    False,
-                    passes,
-                )
-            )
-
-    audit = (
-        enforce_submission_quality(output, policy)
-        if strict
-        else audit_submission_quality(output, policy)
-    )
-    report = {
-        "policy": policy.name,
-        "dropped_raw_columns": sorted(column for column in original_raw if column not in allowed),
-        "repairs": [asdict(repair) for repair in repairs],
-        "repaired_cells": int(sum(repair.repaired_cells for repair in repairs)),
-        "audit": audit,
-    }
-    return output, report
-
-
-def _prepare_full_matrix_submission_input_legacy(
-    input_frame: pd.DataFrame,
-    policy: SubmissionQualityPolicy = COMPETITION_QUALITY_POLICY,
-    *,
-    iqr_multiplier: float = 1.5,
-    clip_iqr_multiplier: float = 1.0,
-    iqr_interpolations: Iterable[str] = (
-        "linear",
-        "lower",
-        "higher",
-        "midpoint",
-        "nearest",
-    ),
-    zscore_threshold: float = 3.0,
-    max_iqr_passes: int = 10,
-) -> tuple[pd.DataFrame, dict[str, object]]:
-    """保留旧版全矩阵消融，供历史报告复现；新代码请使用公开入口。"""
-
-    if iqr_multiplier <= 0.0 or not 0.0 < clip_iqr_multiplier < iqr_multiplier:
-        raise ValueError("全矩阵 IQR 裁剪倍数必须满足 0 < clip < gate")
-    if zscore_threshold <= 0.0 or max_iqr_passes <= 0:
-        raise ValueError("全矩阵质量参数必须为正数")
-    interpolations = tuple(dict.fromkeys(str(value) for value in iqr_interpolations))
-    supported = {"linear", "lower", "higher", "midpoint", "nearest"}
-    if not interpolations or not set(interpolations).issubset(supported):
-        raise ValueError("全矩阵质量包含不支持的分位数插值方法")
-
-    fitted = fit_quality_policy(input_frame, policy)
-    output, base_report = transform_submission_input(input_frame, fitted)
-    required_raw = set(policy.required_raw_columns)
-
-    def numeric_frame(frame: pd.DataFrame) -> pd.DataFrame:
-        return (
-            frame.drop(columns=["datetime"], errors="ignore")
-            .apply(pd.to_numeric, errors="raise")
-            .astype(float)
-        )
-
-    def duplicate_records(frame: pd.DataFrame) -> list[dict[str, str]]:
-        numeric = numeric_frame(frame)
-        duplicate_mask = numeric.T.duplicated(keep="first")
-        records: list[dict[str, str]] = []
-        retained: list[str] = []
-        for column in numeric.columns:
-            if bool(duplicate_mask.loc[column]):
-                duplicate_of = next(
-                    retained_column
-                    for retained_column in retained
-                    if numeric[column].equals(numeric[retained_column])
-                )
-                records.append({"column": column, "duplicate_of": duplicate_of})
-            else:
-                retained.append(column)
-        return records
-
-    def outlier_report(frame: pd.DataFrame) -> dict[str, object]:
-        numeric = numeric_frame(frame)
-        by_method: dict[str, dict[str, int]] = {}
-        for interpolation in interpolations:
-            counts: dict[str, int] = {}
-            for column in numeric.columns:
-                values = numeric[column].dropna()
-                if len(values) < 4:
-                    continue
-                q1 = float(values.quantile(0.25, interpolation=interpolation))
-                q3 = float(values.quantile(0.75, interpolation=interpolation))
-                iqr = q3 - q1
-                if not np.isfinite(iqr) or iqr <= policy.minimum_iqr:
-                    continue
-                count = int(
-                    (
-                        (values < q1 - iqr_multiplier * iqr) | (values > q3 + iqr_multiplier * iqr)
-                    ).sum()
-                )
-                if count:
-                    counts[column] = count
-            by_method[interpolation] = counts
-        zscore: dict[str, int] = {}
-        for column in numeric.columns:
-            values = numeric[column]
-            mean = float(values.mean())
-            std = float(values.std(ddof=0))
-            if np.isfinite(std) and std > 0.0:
-                count = int((((values - mean).abs() / std) > zscore_threshold).sum())
-                if count:
-                    zscore[column] = count
-        return {
-            "iqr_outlier_cells_all_methods": int(
-                sum(sum(counts.values()) for counts in by_method.values())
-            ),
-            "iqr_outliers_by_method": by_method,
-            "zscore_outliers_by_column": zscore,
-            "constant_columns": [
-                column for column in numeric if numeric[column].nunique(dropna=True) <= 1
-            ],
-            "duplicate_columns": duplicate_records(frame),
-        }
-
-    initial_quality = outlier_report(
-        input_frame.loc[
-            :, [column for column in input_frame.columns if column != "datetime"]
-        ].assign(datetime=input_frame["datetime"])
-    )
-    constant_columns = list(fitted.dropped_constant_columns)
-    if constant_columns:
-        output = output.drop(columns=constant_columns, errors="ignore")
-    duplicate_columns = [
-        {"column": column, "duplicate_of": duplicate_of}
-        for column, duplicate_of in fitted.dropped_duplicate_columns
-    ]
-    if duplicate_columns:
-        output = output.drop(
-            columns=[item["column"] for item in duplicate_columns],
-            errors="ignore",
-        )
-
-    winsorized_by_column: dict[str, int] = {
-        column: int(count)
-        for column, count in base_report.get("clipped_cells_by_column", {}).items()
-        if int(count) > 0
-    }
-    winsorization_passes: list[dict[str, object]] = []
-    dropped_after_winsor: list[str] = []
-    for pass_number in range(1, max_iqr_passes + 1):
-        numeric = numeric_frame(output)
-        pass_counts: dict[str, int] = {}
-        for column in numeric.columns:
-            values = numeric[column]
-            q1 = float(values.quantile(0.25))
-            q3 = float(values.quantile(0.75))
-            iqr = q3 - q1
-            if not np.isfinite(iqr) or iqr <= policy.minimum_iqr:
-                continue
-            gate_lower = q1 - iqr_multiplier * iqr
-            gate_upper = q3 + iqr_multiplier * iqr
-            clip_lower = q1 - clip_iqr_multiplier * iqr
-            clip_upper = q3 + clip_iqr_multiplier * iqr
-            mask = (values < gate_lower) | (values > gate_upper)
-            count = int(mask.sum())
-            if count:
-                output[column] = values.clip(lower=clip_lower, upper=clip_upper)
-                pass_counts[column] = count
-                winsorized_by_column[column] = winsorized_by_column.get(column, 0) + count
-        new_quality = outlier_report(output)
-        new_constants = [
-            column for column in new_quality["constant_columns"] if column.startswith("feat_")
-        ]
-        if new_constants:
-            output = output.drop(columns=new_constants)
-            dropped_after_winsor.extend(
-                column for column in new_constants if column not in dropped_after_winsor
-            )
-        winsorization_passes.append(
-            {
-                "pass": pass_number,
-                "winsorized_cells": int(sum(pass_counts.values())),
-                "columns": pass_counts,
-            }
-        )
-        if not pass_counts or outlier_report(output)["iqr_outlier_cells_all_methods"] == 0:
-            break
-
-    final_quality = outlier_report(output)
-    residual_columns = sorted(
-        set().union(
-            *[set(counts) for counts in final_quality["iqr_outliers_by_method"].values()],
-            set(final_quality["zscore_outliers_by_column"]),
-        )
-    )
-    residual_feature_columns = [column for column in residual_columns if column.startswith("feat_")]
-    if residual_feature_columns:
-        output = output.drop(columns=residual_feature_columns)
-    if any(column not in output.columns for column in required_raw):
-        raise ValueError("全矩阵质量归一化不能删除必需 raw 字段")
-    final_quality = outlier_report(output)
-    if final_quality["iqr_outlier_cells_all_methods"] or final_quality["zscore_outliers_by_column"]:
-        raise ValueError(f"全矩阵质量门禁失败: {final_quality}")
-
-    return output, {
-        "policy": f"{policy.name}_full_matrix_v1",
-        "production_eligible": False,
-        "reason": "全矩阵统计依赖评分期分布，仅允许固定结果的历史质量消融",
-        "base_quality": base_report,
-        "initial_quality": initial_quality,
-        "dropped_constant_columns": constant_columns,
-        "dropped_duplicate_columns": duplicate_columns,
-        "dropped_constant_columns_after_winsor": dropped_after_winsor,
-        "dropped_residual_outlier_columns": residual_feature_columns,
-        "winsorized_cells": int(sum(winsorized_by_column.values())),
-        "winsorized_by_column": winsorized_by_column,
-        "winsorization_passes": winsorization_passes,
-        "final_quality": final_quality,
-    }
-
-
 def prepare_full_matrix_submission_input(
     input_frame: pd.DataFrame,
     policy: SubmissionQualityPolicy = COMPETITION_QUALITY_POLICY,
@@ -1695,7 +1463,13 @@ def prepare_full_matrix_submission_input(
     zscore_threshold: float = 3.0,
     max_iqr_passes: int = 10,
 ) -> tuple[pd.DataFrame, dict[str, object]]:
-    """兼容旧入口，在因果副本之后生成仅供提交的 ``Q_REFERENCE`` 矩阵。"""
+    """兼容旧入口，直接生成仅供提交的 ``Q_REFERENCE`` 矩阵。
+
+    历史版本在这里先对传入帧再次拟合 ``Q_CAUSAL``，会让参考归一化意外
+    消费评分期分布。现在调用方若需要因果清洗，必须先显式调用
+    :func:`fit_causal_quality_policy` / :func:`transform_causal_model_input`；本
+    入口只保留全矩阵归一化的旧函数名。
+    """
 
     interpolations = tuple(str(value) for value in iqr_interpolations)
     settings = {
@@ -1707,44 +1481,30 @@ def prepare_full_matrix_submission_input(
         "zscore_threshold": float(zscore_threshold),
         "max_iqr_passes": int(max_iqr_passes),
     }
-    fitted = fit_quality_policy(input_frame, policy)
-    causal_input, causal_report = transform_submission_input(input_frame, fitted)
-    normalized, reference_report = normalize_submission_input_frame(causal_input, settings)
+    normalized, reference_report = prepare_reference_submission_input(
+        input_frame,
+        policy,
+        settings=settings,
+    )
     missing_required = [
         column for column in policy.required_raw_columns if column not in normalized.columns
     ]
     if missing_required:
         raise ValueError(f"全矩阵质量归一化不能删除必需 raw 字段: {missing_required}")
 
-    dropped_constants = list(fitted.dropped_constant_columns)
-    dropped_constants.extend(
-        column
-        for column in reference_report["dropped_constant_columns_before_winsor"]
-        if column not in dropped_constants
-    )
+    dropped_constants = list(reference_report["dropped_constant_columns_before_winsor"])
     dropped_constants.extend(
         column
         for column in reference_report["dropped_constant_columns_after_winsor"]
         if column not in dropped_constants
     )
-    dropped_duplicates = [
-        {"column": column, "duplicate_of": duplicate_of}
-        for column, duplicate_of in fitted.dropped_duplicate_columns
-    ]
-    dropped_duplicates.extend(
-        record
-        for record in reference_report["dropped_duplicate_column_pairs_before_winsor"]
-        if record not in dropped_duplicates
-    )
+    dropped_duplicates = list(reference_report["dropped_duplicate_column_pairs_before_winsor"])
     dropped_duplicates.extend(
         record
         for record in reference_report["dropped_duplicate_column_pairs_after_winsor"]
         if record not in dropped_duplicates
     )
     combined_winsorized = dict(reference_report["winsorized_by_column"])
-    for column, count in causal_report["clipped_cells_by_column"].items():
-        if int(count):
-            combined_winsorized[column] = combined_winsorized.get(column, 0) + int(count)
 
     return normalized, {
         "mode": Q_REFERENCE,
@@ -1753,7 +1513,7 @@ def prepare_full_matrix_submission_input(
         "policy": f"{policy.name}_full_matrix_v2",
         "production_eligible": False,
         "reason": "Q_REFERENCE 仅作用于已生成的最终 input.csv 副本，不回流模型预测",
-        "base_quality": causal_report,
+        "base_quality": None,
         "initial_quality": reference_report["initial_quality"],
         "dropped_constant_columns": dropped_constants,
         "dropped_duplicate_columns": dropped_duplicates,

@@ -20,6 +20,7 @@ from gas_forecast.submission import (
     export_legacy_json,
     package_submission,
     prepare_submission_chain,
+    prepare_submission_chain_with_origin_predictor,
     validate_submission_archive,
     validate_submission_frame,
     validate_submission_input,
@@ -75,6 +76,25 @@ def _origin_input(rows: int = 10) -> pd.DataFrame:
             "feat_invalid": ["future"] * rows,
         }
     )
+
+
+class _StrictOriginPredictor:
+    """记录输入边界，并拒绝 Q_REFERENCE 在预测阶段提前出现。"""
+
+    def __init__(self, output_dir: Path) -> None:
+        self.output_dir = output_dir
+        self.origins: list[pd.Timestamp] = []
+
+    def predict_at_origin(self, history_until_origin: pd.DataFrame) -> pd.DataFrame:
+        assert not (self.output_dir / "input.csv").exists()
+        assert not (self.output_dir / SUBMISSION_QUALITY_RECEIPT).exists()
+        origin = pd.Timestamp(history_until_origin.index[-1])
+        self.origins.append(origin)
+        values: dict[str, float] = {}
+        generator_1 = float(history_until_origin["generator_1"].iloc[-1])
+        for column in expected_prediction_columns():
+            values[column] = generator_1 if column.startswith("generator_1") else generator_1 + 120.0
+        return pd.DataFrame([values], index=pd.DatetimeIndex([origin]))
 
 
 def test_submission_validation_and_archive_contract(tmp_path: Path) -> None:
@@ -200,6 +220,45 @@ def test_formal_submission_chain_freezes_result_and_writes_two_receipts(tmp_path
     )
 
 
+def test_strict_origin_predictor_chain_runs_before_reference_normalization(tmp_path: Path) -> None:
+    """正式链必须逐 origin 预测，且 Q_REFERENCE 不得提前存在或回流。"""
+
+    policy = _causal_policy()
+    training = _training_input()
+    origins = _origin_input(rows=6)
+    training_path = tmp_path / "training.csv"
+    origins_path = tmp_path / "origins.csv"
+    output_dir = tmp_path / "formal"
+    training.to_csv(training_path, index=False)
+    origins.to_csv(origins_path, index=False)
+    predictor = _StrictOriginPredictor(output_dir)
+
+    chain = prepare_submission_chain_with_origin_predictor(
+        training_path,
+        origins_path,
+        output_dir,
+        predictor=predictor,
+        policy=policy,
+        train_end=training["datetime"].iloc[-1],
+    )
+
+    assert predictor.origins == pd.to_datetime(origins["datetime"]).tolist()
+    causal = chain["causal_receipt"]
+    quality = chain["quality_receipt"]
+    assert causal["future_perturbation"]["gate"] == "q_causal_future_perturbation_v2"
+    assert causal["future_perturbation"]["passed"] is True
+    assert causal["future_perturbation"]["max_abs_diff"] == 0.0
+    assert quality["prediction_input"]["origin_only_predictor"] is True
+    assert quality["prediction_input"]["prediction_origin_count"] == len(origins)
+    assert quality["prediction_input"]["generated_after_q_causal"] is True
+    assert quality["prediction_input"]["q_reference_available_during_prediction"] is False
+    assert quality["causal_input_immutable_after_prediction"]["passed"] is True
+    assert quality["s_result_freeze"]["verified_after_reference"] is True
+    assert (output_dir / "causal_model_s_result.csv").read_bytes() == (
+        output_dir / "s_result.csv"
+    ).read_bytes()
+
+
 def test_packaging_twice_never_refits_quality_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """打包是纯验证/封装，重复调用不能触发 Q_CAUSAL 或 Q_REFERENCE 拟合。"""
 
@@ -226,6 +285,11 @@ def test_packaging_twice_never_refits_quality_policy(tmp_path: Path, monkeypatch
         raise AssertionError("package_submission 不得重新拟合质量策略")
 
     monkeypatch.setattr(submission_module.quality_api, "fit_quality_policy", fail_if_refit)
+    monkeypatch.setattr(
+        submission_module.quality_api,
+        "prepare_reference_submission_input",
+        fail_if_refit,
+    )
     archive_path = output_dir / "submission.zip"
     kwargs = {
         "quality_receipt_path": output_dir / SUBMISSION_QUALITY_RECEIPT,

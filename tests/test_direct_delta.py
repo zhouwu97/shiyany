@@ -134,6 +134,28 @@ def test_future_mutations_leave_each_origin_prediction_unchanged() -> None:
     assert audit["cases_checked"] == 8
 
 
+def test_predict_at_origin_rebuilds_only_history_features() -> None:
+    frame = _frame()
+    config = _config()
+    features = build_direct_delta_features(frame)
+    labels = build_direct_delta_targets(frame)
+    model = DirectDeltaForecaster(config).fit(
+        features.iloc[:200],
+        labels.iloc[:200],
+        frame.loc[frame.index[:200], list(config.targets)],
+        train_end=frame.index[199],
+    )
+    origin = frame.index[220]
+    baseline = model.predict_at_origin(frame.loc[:origin], model_name="ridge")
+    changed = frame.copy()
+    changed.loc[changed.index > origin] = -999_999.0
+    observed = model.predict_at_origin(changed.loc[:origin], model_name="ridge")
+
+    np.testing.assert_array_equal(baseline.to_numpy(dtype=float), observed.to_numpy(dtype=float))
+    assert model.last_prediction_metadata_["origin"] == origin
+    assert model.last_prediction_metadata_["used_future_observations"] is False
+
+
 def test_oof_records_fold_origin_train_end_target_horizon_actual_and_predictions() -> None:
     frame = _frame()
     config = _config()
@@ -152,6 +174,7 @@ def test_oof_records_fold_origin_train_end_target_horizon_actual_and_predictions
         config=config,
         folds=[fold],
         nested=True,
+        origin_only=True,
     )
 
     required = {
@@ -171,6 +194,7 @@ def test_oof_records_fold_origin_train_end_target_horizon_actual_and_predictions
     assert (rows["train_end"] + pd.Timedelta(minutes=120) < rows["origin_time"]).all()
     assert report["blind_labels_used"] is False
     assert report["nested_cross_fitting"] is True
+    assert report["origin_only_prediction"] is True
     blind = TimeFold(
         name="blind",
         train_start=fold.train_start,

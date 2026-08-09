@@ -72,7 +72,11 @@ python scripts/audit_data.py --data-dir "data/raw/official/初赛-参赛者使�
 
 正式链路显式分为两段：`Q_CAUSAL` 只从训练期拟合并冻结中位数、无效/常数/重复字段 schema，再逐 origin 生成模型输入；`Q_REFERENCE` 只在合法 `s_result.csv` 已冻结 SHA256 后，对其独立提交副本执行参考全矩阵归一化。两段分别写入 `causal_model_input_receipt.json` 和 `submission_quality_receipt.json`，后者还记录写盘、重新读取、schema、时间轴、数值与哈希复检。
 
+新预测器必须调用 `prepare_submission_chain_with_origin_predictor`：它强制执行 `training → Q_CAUSAL → predict_at_origin(history_until_origin) → legal s_result → SHA256 freeze → input copy → Q_REFERENCE → read-back → ZIP`，并在收据中记录 Q_CAUSAL 文件哈希、逐 origin 调用数及 Q_REFERENCE 未回流预测的证明。`prepare_submission_chain` 和复用冻结输入的入口只保留旧外部结果兼容性；其收据会明确标记为非逐 origin 生成，不能作为新的 P3 候选或 champion 晋级证明。
+
 `scripts/package_submission.py` 不再执行质量拟合或修复，也不会重写 CSV；它只校验并逐字节封装已冻结、已处理的 `input.csv` 和 `s_result.csv`。正式准备首次需提供训练期输入，后续可复用已验证的 Q_CAUSAL 收据。
+
+`gas_forecast.p3_rolling_integration` 将冻结 A61、P1 CausalRolling、P2 成熟残差/严格 Historical Analog 与 A64 Direct Delta 放入统一 development OOF 口径。它只接受 `predict_at_origin`，使用 leave-one-fold-out 的静态交叉拟合权重，并要求 A61、四条候选和最终融合都通过 generator、gas、holder、users、all-features 的 perturb/delete 零差异门禁；任一收据、运行预算或既有 promotion 规则未通过时状态固定为 `STOP_FAIL_CLOSED`，不会改写 `results/best`。
 
 需要保留 Q0/Q1/Q2/Q3 上传消融包时，可执行：
 

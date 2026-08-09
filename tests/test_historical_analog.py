@@ -9,6 +9,7 @@ from gas_forecast.historical_analog import (
     HORIZONS,
     PRE_REGISTERED_SPECS,
     HistoricalAnalogSpec,
+    StrictHistoricalAnalogForecaster,
     _predict_target_for_origins,
     _prepare_targets,
     _strict_candidate_positions,
@@ -153,6 +154,25 @@ def test_candidate_future_trajectory_must_end_strictly_before_train_cutoff() -> 
     last_safe = frame.index.get_loc(train_end - pd.Timedelta(minutes=135))
     assert equal_boundary not in positions
     assert last_safe in positions
+
+
+def test_strict_origin_predictor_freezes_train_cutoff_and_only_uses_history_prefix() -> None:
+    frame = _frame(periods=800)
+    train = frame.iloc[:480]
+    origin = frame.index[620]
+    model = StrictHistoricalAnalogForecaster(HistoricalAnalogSpec(16, 8)).fit(train)
+
+    baseline = model.predict_at_origin(frame.loc[:origin])
+    changed = frame.copy()
+    changed.loc[changed.index > origin, ["generator_1", "generator_all"]] = -999_999.0
+    observed = model.predict_at_origin(changed.loc[:origin])
+
+    pd.testing.assert_frame_equal(baseline, observed)
+    assert model.last_prediction_metadata_["used_future_observations"] is False
+    assert model.last_prediction_metadata_["candidate_trajectory_rule"] == (
+        "candidate_j + 120min < frozen_train_end"
+    )
+    assert baseline["candidate_trajectory_end_before_train_cutoff"].all()
 
 
 def test_candidate_time_gap_and_insufficient_history_fail_closed() -> None:
