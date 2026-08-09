@@ -161,7 +161,8 @@ def _assert_same_frame(
         np.testing.assert_allclose(
             expected.iloc[:, 1:].to_numpy(dtype=float),
             actual.iloc[:, 1:].to_numpy(dtype=float),
-            rtol=0.0,
+            # CSV 十进制往返在大数值上可能产生一个机器精度量级的解析差异。
+            rtol=1e-15,
             atol=5e-12,
         )
     except AssertionError as exc:

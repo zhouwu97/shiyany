@@ -148,6 +148,23 @@ def test_submission_rejects_misaligned_input() -> None:
         validate_submission_input(input_frame, result)
 
 
+def test_csv_write_read_check_accepts_machine_precision_rounding(tmp_path: Path) -> None:
+    """大数值 CSV 往返的一 ULP 解析差异不应被误判为内容改变。"""
+
+    expected = pd.DataFrame(
+        {
+            "datetime": ["2025-05-01 00:00:00"],
+            "feature": [308_691.20799999975],
+        }
+    )
+    path = tmp_path / "roundtrip.csv"
+    expected.to_csv(path, index=False, encoding="utf-8")
+    actual = pd.read_csv(path)
+
+    assert expected.loc[0, "feature"] != actual.loc[0, "feature"]
+    submission_module._assert_same_frame(expected, actual, label="回归测试")
+
+
 def test_formal_submission_chain_freezes_result_and_writes_two_receipts(tmp_path: Path) -> None:
     """Q_CAUSAL 与 Q_REFERENCE 的边界必须可由落盘收据独立复核。"""
 

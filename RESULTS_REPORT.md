@@ -18,6 +18,40 @@
 
 该记录是平台实际返回结果；本地使用参考标签计算的 `98.5668` 分仅作为离线估算，不能替代平台分数。
 
+## 2026-08-09 Q4 reference-quality input A/B 本地审计
+
+实际运行目录：`.tmp/q4_reference_quality_packages_20260809_run3/`。运行只读取正式评分 input、
+官方训练期生产数据、冻结模型和已合法提交 ZIP；未读取 blind、平台答案或未来真实标签，也未上传。
+
+- 正式 scoring input：192 行、699 列，SHA256
+  `7629a0d4c65ed4a39e5dbefe1748100238b92502ba32d834d04226e463d2781e`。
+- 正式特征 API 重建 training input：11,521 行、703 列，冻结统计使用截至
+  `2025-04-30 23:45:00` 的 11,520 行；文件 SHA256
+  `97c101e38631679739c03e7daa891696a10e5aaea4008de32b8fffeda276e933`。
+- 冻结模型 SHA256：`90be24067dbfd67d677b6d03ba7d3ce1f0b5613ed7fa2c55aebc4e829e9413de`。
+- 源 ZIP 内冻结 `s_result.csv` SHA256：
+  `2dfe7f29cbde9faf846e4a03be292a61eceb93469b199963c565bba2a8c37efe`。
+
+| 本地机械量 | SUB_A Q_CAUSAL | SUB_B Q_REFERENCE |
+| --- | ---: | ---: |
+| `miss`：非有限单元 | 0 | 0 |
+| `dup`：重复时间戳 / 重复列 | 0 / 18 | 0 / 0 |
+| `out`：五口径 IQR / `abs(z)>3` | 2293 / 395 | 0 / 0 |
+| `intv`：非 15 分钟间隔 | 0 | 0 |
+| `invalid_col`：非法列 | 0 | 0 |
+| `feat`：`feat_` 字段 | 622 | 534 |
+| `comp`：行数 / 时间轴对齐 / 缺必需 raw | 192 / 是 / 0 | 192 / 是 / 0 |
+
+SUB_B 写回重读的 schema、行数、时间轴和数值均一致；终态为 0 nonfinite、0 constant、
+0 duplicate、0 五口径 IQR outlier、0 `abs(z)>3` residual。Q_REFERENCE 收据确认
+`feeds_model=false`，Q_CAUSAL 输入在参考阶段前后 SHA256 均为
+`27fb44af8191979410ed2480f1ec8100d9ce840629ca86afcab3a2632f305e9b`。
+
+SUB_A ZIP SHA256 为 `def9a256b569d4efc1ff5053d51c254cb2073b7f5bd4c7a8cb214e0c304ded83`；
+SUB_B ZIP SHA256 为 `0bc5cf66e8c5adbf2dece21452bbcd0710d6fb841c9dc45905a43f5411f64b08`。
+源、A/B 文件及 A/B ZIP 解压成员共五处 `s_result.csv` SHA256 完全相同。平台 A/B 状态为
+`submitted=false`，质量与准确率分数均未填写；这些本地机械量不能推导平台 50/50。
+
 ## 2026-07-31 M1 共享逐行 OOF
 
 使用完全相同的 20 个外层滚动折，保存 62,858 条目标×步长预测单元；每行登记 `train_end` 并满足 120 分钟 purge。8 worker 完整回算耗时 33.7 分钟，折级结果即时保存。

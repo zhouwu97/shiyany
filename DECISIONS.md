@@ -1,5 +1,28 @@
 # 决策记录
 
+## 2026-08-09 Q4 reference-quality input A/B 包
+
+- 预测来源审计确认：A61 目录只有 development/verification 的 `oof.csv`、报告与训练收据，
+  两份 manifest 均为 `stage=A61_recursive_arx_diversity`、`formal_candidate=false`，不存在可
+  独立声明为 A61 的生产 `s_result.csv`。Q4 因此使用已经合法提交、且仓库已有平台准确率
+  `49.9/50` 记录的 `提交这个_训练优化_复跑/咕咕嘎嘎_gas_predict_prelim.zip` 冻结预测；
+  源 ZIP SHA256 为 `65039ac7fd38a23c75a76dcacff79b1230efee07ee201d35ce146c65c7ee1561`，
+  其中 `s_result.csv` SHA256 为
+  `2dfe7f29cbde9faf846e4a03be292a61eceb93469b199963c565bba2a8c37efe`。不得把该预测
+  描述为 A61，也不得改用 aggressive 历史结果冒充 A61。
+- `scripts/run_q4_reference_quality_packages.py` 必须调用正式
+  `gas_forecast.submission.prepare_submission_chain`。训练 input 由冻结正式模型配置通过
+  `align_tables + build_causal_features` 重建，质量统计截止于 `2025-04-30 23:45:00`；评分
+  input 读取上述正式 ZIP 的 `input.csv`。SUB_A 使用链内冻结的 Q_CAUSAL input，SUB_B 使用
+  其独立副本经过 Q_REFERENCE 后的 input；两个包共享完全相同的冻结预测字节。
+- A/B 目录和 ZIP 根目录都只允许 `input.csv`、`s_result.csv`，两阶段收据统一放在包外
+  `receipts/formal_chain/`。本地报告明确记录平台分数为 `null`、`submitted=false`；没有明确
+  外部授权前不上传，不能由本地零异常门禁推断平台 50/50。
+- 正式宽表首次运行暴露 CSV 写回复核的真实缺陷：约 30 万量级数值的一 ULP 十进制解析差异
+  （最大绝对差 `2.32830644e-10`、相对差约 `1.94e-16`）被 `rtol=0` 误判为内容改变。
+  `_assert_same_frame` 最小调整为 `rtol=1e-15, atol=5e-12`，仍严格检查 schema、时间轴、
+  非有限值和冻结文件字节，并增加对应回归测试。
+
 ## 2026-07-31 pooled OOF 重构
 
 - 旧逐级选择器保留在 `selection_legacy.py`，默认自动入口切换为 `selection_policy=pooled_oof`。
