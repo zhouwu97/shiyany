@@ -76,6 +76,71 @@ class _PreparedTarget:
     trajectories: np.ndarray
 
 
+class StrictHistoricalAnalogForecaster:
+    """冻结候选池后只接受 ``history_until_origin`` 的历史类比预测器。
+
+    该适配器服务于 P3 正式集成。``fit`` 只保存一个外层折训练截止点；每次
+    ``predict_at_origin`` 都只接收截至当前 origin 的数据，再以冻结截止点
+    过滤候选完整八步轨迹。这样既不会把 held fold 标签放入候选池，也不会让
+    调用方误传整段评分期矩阵。
+    """
+
+    version = "p2_strict_historical_analog_origin_v1"
+
+    def __init__(
+        self,
+        spec: HistoricalAnalogSpec = HistoricalAnalogSpec(16, 8),
+        *,
+        targets: tuple[str, ...] = TARGETS,
+    ) -> None:
+        validate_pre_registered_specs((spec,))
+        if tuple(targets) != TARGETS:
+            raise ValueError("严格历史类比只支持 generator_1 和 generator_all")
+        self.spec = spec
+        self.targets = tuple(targets)
+        self.train_start_: pd.Timestamp | None = None
+        self.train_end_: pd.Timestamp | None = None
+        self.last_prediction_metadata_: dict[str, object] = {}
+
+    def fit(self, training_history: pd.DataFrame) -> "StrictHistoricalAnalogForecaster":
+        """冻结严格候选池的训练边界，不保存训练期之后的数据。"""
+
+        values = _validate_frame(training_history, self.targets)
+        self.train_start_ = pd.Timestamp(values.index.min())
+        self.train_end_ = pd.Timestamp(values.index.max())
+        return self
+
+    def predict_at_origin(self, history_until_origin: pd.DataFrame) -> pd.DataFrame:
+        """仅用当前 origin 及其左侧历史生成 16 个绝对预测。"""
+
+        if self.train_start_ is None or self.train_end_ is None:
+            raise RuntimeError("严格历史类比尚未拟合")
+        values = _validate_frame(history_until_origin, self.targets)
+        origin = pd.Timestamp(values.index[-1])
+        if origin <= self.train_end_:
+            raise ValueError("严格历史类比的预测 origin 必须晚于冻结训练截止点")
+        if values.index.min() > self.train_start_ or self.train_end_ not in values.index:
+            raise ValueError("history_until_origin 未覆盖冻结训练历史")
+        prepared = _prepare_targets(values, self.targets)
+        prediction = _prediction_long(
+            prepared,
+            pd.DatetimeIndex([origin]),
+            self.spec,
+            train_start=self.train_start_,
+            train_end=self.train_end_,
+            validation_start=origin,
+            targets=self.targets,
+            horizons=HORIZONS,
+        )
+        self.last_prediction_metadata_ = {
+            "origin": origin,
+            "train_end": self.train_end_,
+            "candidate_trajectory_rule": "candidate_j + 120min < frozen_train_end",
+            "used_future_observations": False,
+        }
+        return prediction.sort_values(["target", "horizon"], kind="stable").reset_index(drop=True)
+
+
 def validate_pre_registered_specs(
     specs: Iterable[HistoricalAnalogSpec] = PRE_REGISTERED_SPECS,
 ) -> tuple[HistoricalAnalogSpec, ...]:
@@ -175,17 +240,25 @@ def _strict_candidate_positions(
     validation_start: pd.Timestamp,
     context: int,
 ) -> np.ndarray:
-    """返回完整轨迹严格结束在 held fold 前的有效历史 analog origins。"""
+    """返回候选窗口和完整未来轨迹都位于训练截止点前的 origins。
+
+    ``train_end`` 是本次类比搜索可见历史的严格截止点，而不是“最后一个
+    可以拿来当候选 origin 的时刻”。候选 ``j`` 的 context 窗口必须从
+    ``train_start`` 之后开始，且第八步真值 ``j + 120min`` 必须严格早于
+    ``train_end``。这会拒绝虽然早于 held fold、但借用了训练截止点之后
+    标签的伪历史候选。
+    """
 
     trajectory_end = prepared.index + pd.Timedelta(minutes=MAX_TRAJECTORY_MINUTES)
+    context_start = prepared.index - pd.Timedelta(minutes=STEP_MINUTES * (context - 1))
+    before_training_cutoff = trajectory_end < pd.Timestamp(train_end)
     before_held_fold = trajectory_end < pd.Timestamp(validation_start)
-    in_outer_train = (prepared.index >= pd.Timestamp(train_start)) & (
-        prepared.index <= pd.Timestamp(train_end)
-    )
+    window_in_training_history = context_start >= pd.Timestamp(train_start)
     features = prepared.features_by_context[context]
     valid = (
-        before_held_fold
-        & in_outer_train
+        before_training_cutoff
+        & before_held_fold
+        & window_in_training_history
         & np.isfinite(features).all(axis=1)
         & np.isfinite(prepared.trajectories).all(axis=1)
     )
@@ -215,8 +288,9 @@ def _predict_target_for_origins(
 ) -> pd.DataFrame:
     """以一个固定配置对若干 held origins 预测八步增量轨迹。
 
-    重要边界：候选 ``j`` 的最后标签为 ``j + 120min``，并要求它严格
-    小于 held fold 的开始时刻。特征标准化也只在这些候选轨迹上拟合。
+    重要边界：候选 ``j`` 的 context 窗口与最后标签 ``j + 120min`` 都
+    必须位于 ``train_end`` 严格之前；随后仍额外验证它早于 held fold。
+    特征标准化也只在这些完整历史候选轨迹上拟合。
     """
 
     positions = prepared.index.get_indexer(origins)
@@ -232,30 +306,34 @@ def _predict_target_for_origins(
     )
     query = features[positions]
     count = len(origins)
+    if len(candidate_positions) < spec.neighbors:
+        raise ValueError(
+            "严格历史候选不足："
+            f"配置 {spec.name} 需要 {spec.neighbors} 条，实际只有 {len(candidate_positions)} 条"
+        )
     prediction_delta = np.zeros((count, len(HORIZONS)), dtype=float)
     nearest_distance = np.full(count, np.nan, dtype=float)
     median_neighbor_distance = np.full(count, np.nan, dtype=float)
     effective_neighbor_count = np.zeros(count, dtype=float)
     uncertainty = np.full((count, len(HORIZONS)), np.nan, dtype=float)
-    fallback = np.ones(count, dtype=bool)
+    fallback = np.zeros(count, dtype=bool)
 
     valid_query = np.isfinite(query).all(axis=1) & np.isfinite(prepared.values[positions])
-    if len(candidate_positions) and valid_query.any():
-        train = features[candidate_positions]
-        scaled_train, scaled_query = _standardize_from_training(train, query[valid_query])
-        neighbors = min(spec.neighbors, len(candidate_positions))
-        # metric 固定为 Euclidean；NearestNeighbors 仅消费训练期冻结后的向量。
-        finder = NearestNeighbors(n_neighbors=neighbors, metric="euclidean")
-        finder.fit(scaled_train)
-        distances, local_indices = finder.kneighbors(scaled_query, return_distance=True)
-        selected_deltas = prepared.trajectories[candidate_positions[local_indices]]
-        valid_positions = np.flatnonzero(valid_query)
-        prediction_delta[valid_positions] = np.median(selected_deltas, axis=1)
-        nearest_distance[valid_positions] = distances[:, 0]
-        median_neighbor_distance[valid_positions] = np.median(distances, axis=1)
-        effective_neighbor_count[valid_positions] = float(neighbors)
-        uncertainty[valid_positions] = selected_deltas.std(axis=1, ddof=0)
-        fallback[valid_positions] = False
+    if not valid_query.all():
+        invalid_count = int((~valid_query).sum())
+        raise ValueError(f"严格历史类比查询缺少完整因果窗口或当前值: {invalid_count} 条")
+    train = features[candidate_positions]
+    scaled_train, scaled_query = _standardize_from_training(train, query)
+    # metric 固定为 Euclidean；NearestNeighbors 仅消费训练期冻结后的向量。
+    finder = NearestNeighbors(n_neighbors=spec.neighbors, metric="euclidean")
+    finder.fit(scaled_train)
+    distances, local_indices = finder.kneighbors(scaled_query, return_distance=True)
+    selected_deltas = prepared.trajectories[candidate_positions[local_indices]]
+    prediction_delta[:] = np.median(selected_deltas, axis=1)
+    nearest_distance[:] = distances[:, 0]
+    median_neighbor_distance[:] = np.median(distances, axis=1)
+    effective_neighbor_count[:] = float(spec.neighbors)
+    uncertainty[:] = selected_deltas.std(axis=1, ddof=0)
 
     anchor = prepared.values[positions]
     predictions = anchor[:, None] + prediction_delta
@@ -266,6 +344,10 @@ def _predict_target_for_origins(
         "effective_neighbor_count": effective_neighbor_count,
         "fallback_to_persistence": fallback,
         "candidate_pool_count": np.full(count, len(candidate_positions), dtype=int),
+        "candidate_window_and_trajectory_before_train_cutoff": np.full(
+            count, True, dtype=bool
+        ),
+        "candidate_trajectory_end_before_train_cutoff": np.full(count, True, dtype=bool),
         "candidate_trajectory_end_before_validation": np.full(count, True, dtype=bool),
     }
     for offset, horizon in enumerate(HORIZONS):
@@ -309,6 +391,8 @@ def _prediction_long(
                     "effective_neighbor_count",
                     "fallback_to_persistence",
                     "candidate_pool_count",
+                    "candidate_window_and_trajectory_before_train_cutoff",
+                    "candidate_trajectory_end_before_train_cutoff",
                     "candidate_trajectory_end_before_validation",
                     f"analog_uncertainty_t+{minutes}",
                     f"prediction_t+{minutes}",
@@ -518,6 +602,8 @@ def build_historical_analog_oof(
     config: ForecastConfig | None = None,
     scope: str = "screening",
     specs: Iterable[HistoricalAnalogSpec] = PRE_REGISTERED_SPECS,
+    folds: Iterable[TimeFold] | None = None,
+    origin_only: bool = False,
 ) -> HistoricalAnalogResult:
     """运行六个固定配置的严格 OOF，并返回每折嵌套选择后的统一预测。
 
@@ -535,14 +621,20 @@ def build_historical_analog_oof(
         raise ValueError("历史相似样本只支持 15 到 120 分钟的八个预注册步长")
     values = _validate_frame(frame, targets)
     registered = validate_pre_registered_specs(specs)
-    folds = select_historical_analog_folds(values.index, config, scope=scope)
-    if not folds:
+    selected_folds = (
+        select_historical_analog_folds(values.index, config, scope=scope)
+        if folds is None
+        else list(folds)
+    )
+    if any(fold.blind for fold in selected_folds):
+        raise ValueError("历史相似样本 OOF 禁止读取 blind 折")
+    if not selected_folds:
         raise ValueError("没有可用的非 blind 开发折")
     prepared = _prepare_targets(values, targets)
     parts: list[pd.DataFrame] = []
     trace_rows: list[dict[str, object]] = []
 
-    for fold in folds:
+    for fold in selected_folds:
         selected, selection_trace = _inner_selection(
             prepared,
             values,
@@ -556,59 +648,84 @@ def build_historical_analog_oof(
         validation_origins = pd.DatetimeIndex(sorted(base["origin_time"].unique()))
         keys = ["origin_time", "target", "horizon"]
         selected_diagnostics: pd.DataFrame | None = None
-        for spec in registered:
-            prediction = _prediction_long(
-                prepared,
-                validation_origins,
-                spec,
-                train_start=fold.train_start,
-                train_end=fold.train_end,
-                validation_start=fold.validation_start,
-                targets=targets,
-                horizons=horizons,
+        if origin_only:
+            model = StrictHistoricalAnalogForecaster(selected).fit(
+                values.loc[(values.index >= fold.train_start) & (values.index <= fold.train_end)]
             )
-            prediction_column = spec.prediction_column()
-            renamed = prediction.rename(
-                columns={
-                    "prediction": prediction_column,
-                    "nearest_distance": f"{spec.name}_nearest_distance",
-                    "median_neighbor_distance": f"{spec.name}_median_neighbor_distance",
-                    "effective_neighbor_count": f"{spec.name}_effective_neighbor_count",
-                    "analog_uncertainty": f"{spec.name}_analog_uncertainty",
-                    "fallback_to_persistence": f"{spec.name}_fallback_to_persistence",
-                    "candidate_pool_count": f"{spec.name}_candidate_pool_count",
-                    "candidate_trajectory_end_before_validation": (
-                        f"{spec.name}_trajectory_safe"
-                    ),
-                }
-            )
-            base = base.merge(renamed, on=keys, how="left", validate="one_to_one")
-            if spec == selected:
-                selected_diagnostics = prediction
+            per_origin: list[pd.DataFrame] = []
+            for origin in validation_origins:
+                # P3 的正式分支只把 ``origin`` 及之前的生产历史交给预测器。
+                per_origin.append(model.predict_at_origin(values.loc[:origin]))
+            selected_diagnostics = pd.concat(per_origin, ignore_index=True)
+            base = base.merge(selected_diagnostics, on=keys, how="left", validate="one_to_one")
+            base["historical_analog_pred"] = base["prediction"]
+        else:
+            for spec in registered:
+                prediction = _prediction_long(
+                    prepared,
+                    validation_origins,
+                    spec,
+                    train_start=fold.train_start,
+                    train_end=fold.train_end,
+                    validation_start=fold.validation_start,
+                    targets=targets,
+                    horizons=horizons,
+                )
+                prediction_column = spec.prediction_column()
+                renamed = prediction.rename(
+                    columns={
+                        "prediction": prediction_column,
+                        "nearest_distance": f"{spec.name}_nearest_distance",
+                        "median_neighbor_distance": f"{spec.name}_median_neighbor_distance",
+                        "effective_neighbor_count": f"{spec.name}_effective_neighbor_count",
+                        "analog_uncertainty": f"{spec.name}_analog_uncertainty",
+                        "fallback_to_persistence": f"{spec.name}_fallback_to_persistence",
+                        "candidate_pool_count": f"{spec.name}_candidate_pool_count",
+                        "candidate_window_and_trajectory_before_train_cutoff": (
+                            f"{spec.name}_window_and_trajectory_before_train_cutoff"
+                        ),
+                        "candidate_trajectory_end_before_train_cutoff": (
+                            f"{spec.name}_trajectory_before_train_cutoff"
+                        ),
+                        "candidate_trajectory_end_before_validation": (
+                            f"{spec.name}_trajectory_safe"
+                        ),
+                    }
+                )
+                base = base.merge(renamed, on=keys, how="left", validate="one_to_one")
+                if spec == selected:
+                    selected_diagnostics = prediction
         if selected_diagnostics is None:
             raise RuntimeError("嵌套选择没有找到可用的预注册配置")
-        selected_prediction = selected.prediction_column()
-        base["historical_analog_pred"] = base[selected_prediction]
-        # 统一 OOF 契约要求 generic prediction 字段保存当折冻结配置的输出。
-        base["prediction"] = base["historical_analog_pred"]
-        generic_diagnostics = selected_diagnostics.loc[
-            :,
-            keys
-            + [
-                "nearest_distance",
-                "median_neighbor_distance",
-                "effective_neighbor_count",
-                "analog_uncertainty",
-                "fallback_to_persistence",
-                "candidate_pool_count",
-                "candidate_trajectory_end_before_validation",
-            ],
-        ]
-        base = base.merge(generic_diagnostics, on=keys, how="left", validate="one_to_one")
+        if not origin_only:
+            selected_prediction = selected.prediction_column()
+            base["historical_analog_pred"] = base[selected_prediction]
+            # 统一 OOF 契约要求 generic prediction 字段保存当折冻结配置的输出。
+            base["prediction"] = base["historical_analog_pred"]
+            generic_diagnostics = selected_diagnostics.loc[
+                :,
+                keys
+                + [
+                    "nearest_distance",
+                    "median_neighbor_distance",
+                    "effective_neighbor_count",
+                    "analog_uncertainty",
+                    "fallback_to_persistence",
+                    "candidate_pool_count",
+                    "candidate_window_and_trajectory_before_train_cutoff",
+                    "candidate_trajectory_end_before_train_cutoff",
+                    "candidate_trajectory_end_before_validation",
+                ],
+            ]
+            base = base.merge(generic_diagnostics, on=keys, how="left", validate="one_to_one")
         base["selected_context"] = selected.context
         base["selected_neighbors"] = selected.neighbors
         base["selected_metric"] = selected.metric
         base["selection_used_held_fold_labels"] = False
+        if not base["candidate_window_and_trajectory_before_train_cutoff"].all():
+            raise RuntimeError(f"折 {fold.name} 存在越过训练截止点的 analog 候选")
+        if not base["candidate_trajectory_end_before_train_cutoff"].all():
+            raise RuntimeError(f"折 {fold.name} 存在越过训练截止点的 analog 未来标签")
         if not base["candidate_trajectory_end_before_validation"].all():
             raise RuntimeError(f"折 {fold.name} 存在跨 held fold 的 analog trajectory")
         parts.append(base)
@@ -620,14 +737,17 @@ def build_historical_analog_oof(
                 "train_end": fold.train_end,
                 "validation_start": fold.validation_start,
                 "validation_end": fold.validation_end,
-                "candidate_trajectory_latest_end": fold.validation_start
+                "candidate_trajectory_latest_end": fold.train_end
                 - pd.Timedelta(minutes=STEP_MINUTES),
+                "candidate_training_cutoff": fold.train_end,
+                "candidate_window_and_trajectory_before_train_cutoff": True,
                 "selected_context": selected.context,
                 "selected_neighbors": selected.neighbors,
                 "selected_metric": selected.metric,
                 "selection_used_held_fold_labels": False,
                 "selection_data_end": fold.train_end,
-                "candidate_pool_max_time": fold.train_end,
+                "candidate_pool_max_time": fold.train_end
+                - pd.Timedelta(minutes=MAX_TRAJECTORY_MINUTES + STEP_MINUTES),
                 "nested_cross_fitting": bool(selection_trace["nested_cross_fitting"]),
                 "selection_reason": str(selection_trace["selection_reason"]),
                 "inner_folds": json.dumps(selection_trace["inner_folds"]),
@@ -649,10 +769,14 @@ def build_historical_analog_oof(
         "persistence": score_oof_long(rows, "persistence_pred"),
         "historical_analog": score_oof_long(rows, "historical_analog_pred"),
         **{
-            spec.name: score_oof_long(rows, spec.prediction_column()) for spec in registered
+            spec.name: score_oof_long(rows, spec.prediction_column())
+            for spec in registered
+            if spec.prediction_column() in rows
         },
     }
-    screening_rows = rows.loc[rows["fold"].isin([fold.name for fold in folds[:SCREENING_FOLDS]])]
+    screening_rows = rows.loc[
+        rows["fold"].isin([fold.name for fold in selected_folds[:SCREENING_FOLDS]])
+    ]
     screening = _screening_summary(screening_rows, "historical_analog_pred")
     report: dict[str, object] = {
         "experiment": "historical_analog",
@@ -665,9 +789,10 @@ def build_historical_analog_oof(
         "horizons_minutes": [STEP_MINUTES * horizon for horizon in horizons],
         "pre_registered_search": [asdict(spec) for spec in registered],
         "distance_metric": "euclidean",
-        "trajectory_rule": "candidate_j + 120min < validation_start",
+        "trajectory_rule": "candidate_window_start >= train_start and candidate_j + 120min < train_end",
+        "origin_only_prediction": bool(origin_only),
         "nested_cross_fitting": True,
-        "folds": [fold.name for fold in folds],
+        "folds": [fold.name for fold in selected_folds],
         "metrics": metrics,
         "screening": screening,
         "full_development_gate": screening if scope == "screening" else _screening_summary(
@@ -692,9 +817,9 @@ def predict_historical_analog_at_origin(
 ) -> pd.DataFrame:
     """在单个 origin 产出 16 个严格因果预测和四项距离诊断。
 
-    该公共入口用于未来扰动审计。它通过把一个 15 分钟后的边界视为
-    ``validation_start``，允许候选轨迹至多结束在 origin 本身，绝不读取
-    origin 之后的生产值。
+    该公共入口用于未来扰动审计。它把下一个 15 分钟刻度作为严格训练
+    截止点，因此候选完整轨迹至多结束在 origin 本身，绝不读取 origin
+    之后的生产值。
     """
 
     validate_pre_registered_specs((spec,))
@@ -711,7 +836,7 @@ def predict_historical_analog_at_origin(
         pd.DatetimeIndex([timestamp]),
         spec,
         train_start=values.index.min(),
-        train_end=timestamp - pd.Timedelta(minutes=MAX_TRAJECTORY_MINUTES),
+        train_end=timestamp + pd.Timedelta(minutes=STEP_MINUTES),
         validation_start=timestamp + pd.Timedelta(minutes=STEP_MINUTES),
         targets=targets,
         horizons=HORIZONS,

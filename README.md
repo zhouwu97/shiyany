@@ -70,9 +70,13 @@ python scripts/audit_data.py --data-dir "data/raw/official/初赛-参赛者使�
 
 ## 提交输入质量
 
-正式打包会执行 `submission_quality.py` 中的初赛 raw schema 与无标签 IQR 修复：原始字段收敛为 21 列，额外原始字段不会伪装成有效观测；派生字段必须保留 `feat_` 前缀。该步骤不改动 `s_result.csv`，因此可在冻结预测不变的前提下独立修复数据质量链路。
+正式链路显式分为两段：`Q_CAUSAL` 只从训练期拟合并冻结中位数、无效/常数/重复字段 schema，再逐 origin 生成模型输入；`Q_REFERENCE` 只在合法 `s_result.csv` 已冻结 SHA256 后，对其独立提交副本执行参考全矩阵归一化。两段分别写入 `causal_model_input_receipt.json` 和 `submission_quality_receipt.json`，后者还记录写盘、重新读取、schema、时间轴、数值与哈希复检。
 
-`scripts/prepare_submission.py` 和 `scripts/package_submission.py` 默认启用该质量策略；`scripts/production_gate.py` 会将额外 raw 字段、常数 raw 字段和登记字段的未修复 IQR 越界视为失败。
+新预测器必须调用 `prepare_submission_chain_with_origin_predictor`：它强制执行 `training → Q_CAUSAL → predict_at_origin(history_until_origin) → legal s_result → SHA256 freeze → input copy → Q_REFERENCE → read-back → ZIP`，并在收据中记录 Q_CAUSAL 文件哈希、逐 origin 调用数及 Q_REFERENCE 未回流预测的证明。`prepare_submission_chain` 和复用冻结输入的入口只保留旧外部结果兼容性；其收据会明确标记为非逐 origin 生成，不能作为新的 P3 候选或 champion 晋级证明。
+
+`scripts/package_submission.py` 不再执行质量拟合或修复，也不会重写 CSV；它只校验并逐字节封装已冻结、已处理的 `input.csv` 和 `s_result.csv`。正式准备首次需提供训练期输入，后续可复用已验证的 Q_CAUSAL 收据。
+
+`gas_forecast.p3_rolling_integration` 将冻结 A61、P1 CausalRolling、P2 成熟残差/严格 Historical Analog 与 A64 Direct Delta 放入统一 development OOF 口径。它只接受 `predict_at_origin`，使用 leave-one-fold-out 的静态交叉拟合权重，并要求 A61、四条候选和最终融合都通过 generator、gas、holder、users、all-features 的 perturb/delete 零差异门禁；任一收据、运行预算或既有 promotion 规则未通过时状态固定为 `STOP_FAIL_CLOSED`，不会改写 `results/best`。
 
 需要保留 Q0/Q1/Q2/Q3 上传消融包时，可执行：
 
@@ -229,20 +233,22 @@ python scripts/apply_online_oof.py `
 
 ```powershell
 python scripts/show_best.py
-python scripts/prepare_submission.py
+python scripts/prepare_submission.py `
+  --training-input <训练期输入.csv> `
+  --train-end <训练期最后一个 origin>
 ```
 
-第二条命令会校验 `results/best`、输入特征、192×16 预测及 ZIP 内容，并打开 `提交这个/`。平台只上传 `提交这个/咕咕嘎嘎_gas_predict_prelim.zip`；ZIP 根目录固定包含 `input.csv` 和 `s_result.csv`。
+第二条命令会冻结 Q_CAUSAL 训练统计，校验 `results/best`、输入特征、192×16 预测及 ZIP 内容，并打开 `提交这个/`。后续重复执行会复用 `causal_model_input.csv` 与其收据，不重新拟合训练统计。平台只上传 `提交这个/咕咕嘎嘎_gas_predict_prelim.zip`；ZIP 根目录固定包含 `input.csv` 和 `s_result.csv`，同目录的两个 JSON 收据用于审计。
 
 自动调参不属于正式默认入口。需要开展参数搜索时，应使用独立训练期实验目录、同一套滚动折和有限候选集合，完成后再把冻结配置交给本入口验收。
 
-也可以分步执行已有命令：
+也可以分步执行训练和候选预测；候选预测不能直接打包，进入正式提交前仍必须通过 `prepare_submission.py` 生成 Q_CAUSAL/Q_REFERENCE 收据：
 
 ```powershell
 # 使用冻结路由训练多模型包装器
 python scripts/train.py --data-dir "data/raw/official/初赛-参赛者使用" --version routed --selection <comparison-report>
 
-# 使用上一条命令输出的实际模型路径
+# 使用上一条命令输出的实际模型路径生成候选预测
 python scripts/predict.py `
   --train-dir "data/raw/official/初赛-参赛者使用" `
   --test-dir "data/raw/scoring/初赛-评分所用测试集" `
@@ -250,9 +256,11 @@ python scripts/predict.py `
   --output-dir submissions/final
 
 python scripts/validate_submission.py --input submissions/final/s_result.csv
+# 仅封装 prepare_submission 已生成的冻结副本；不会隐式执行质量处理
 python scripts/package_submission.py `
-  --input submissions/final/input.csv `
-  --result submissions/final/s_result.csv `
+  --input "提交这个/input.csv" `
+  --result "提交这个/s_result.csv" `
+  --quality-receipt "提交这个/submission_quality_receipt.json" `
   --output submissions/咕咕嘎嘎_gas_predict_prelim.zip
 ```
 

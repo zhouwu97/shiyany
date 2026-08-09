@@ -8,27 +8,31 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
-import pandas as pd
+# 直接执行脚本时优先使用当前工作树，避免导入其他 worktree 的已安装包。
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+LOCAL_CODE = PROJECT_ROOT / "code"
+if str(LOCAL_CODE) not in sys.path:
+    sys.path.insert(0, str(LOCAL_CODE))
 
-from gas_forecast.experiments import (
+from gas_forecast.experiments import (  # noqa: E402
     is_eligible_for_best,
     promotion_evidence_passes,
     promote_if_best,
     write_json,
 )
-from gas_forecast.submission import (
+from gas_forecast.submission import (  # noqa: E402
+    CAUSAL_MODEL_INPUT_RECEIPT,
     SUBMISSION_MEMBERS,
+    SUBMISSION_QUALITY_RECEIPT,
     package_submission,
+    prepare_submission_chain,
+    prepare_submission_from_frozen_causal_input,
     validate_submission_archive,
-    validate_submission_frame,
-    validate_submission_input,
 )
-from gas_forecast.submission_quality import (
-    COMPETITION_QUALITY_POLICY,
-    prepare_submission_input,
-)
+from gas_forecast.submission_quality import COMPETITION_QUALITY_POLICY  # noqa: E402
 
 
 def sha256(path: Path) -> str:
@@ -37,6 +41,33 @@ def sha256(path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _copy_if_distinct(source: Path, destination: Path) -> None:
+    """复制正式工件，避免 --output-dir 与来源相同时触发 SameFileError。"""
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if source.resolve() != destination.resolve():
+        shutil.copyfile(source, destination)
+
+
+def _training_input_from_manifest(manifest: dict[str, object], best_dir: Path) -> Path | None:
+    """兼容已登记训练输入的旧 best；绝不回退到评分 input.csv。"""
+
+    candidates: list[Path] = [best_dir / "training_input.csv"]
+    for key in ("training_input", "training_input_csv", "causal_training_input"):
+        value = manifest.get(key)
+        if isinstance(value, str) and value.strip():
+            candidate = Path(value)
+            candidates.append(candidate if candidate.is_absolute() else best_dir / candidate)
+    source_run = manifest.get("source_run")
+    if isinstance(source_run, str) and source_run.strip():
+        root = Path(source_run)
+        candidates.extend((root / "training_input.csv", root / "submission" / "training_input.csv"))
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def _find_source_file(source: Path, names: tuple[str, ...]) -> Path:
@@ -185,7 +216,16 @@ def main() -> None:
     parser.add_argument(
         "--input-file",
         type=Path,
-        help="仅用于给旧 best 补充由同一冻结模型生成的 input.csv",
+        help="由同一模型逐 origin 生成的原始评分输入；与 --training-input 一起生成 Q_CAUSAL 输入",
+    )
+    parser.add_argument(
+        "--training-input",
+        type=Path,
+        help="仅含训练期生产观测的输入，用于冻结 Q_CAUSAL 中位数、无效列和 schema",
+    )
+    parser.add_argument(
+        "--train-end",
+        help="训练期最后一个可用 origin；未给出时由训练输入的最后一行确定",
     )
     parser.add_argument("--team-name", default="咕咕嘎嘎")
     parser.add_argument("--no-open", action="store_true")
@@ -207,51 +247,70 @@ def main() -> None:
     if not promotion_evidence_passes(args.best_dir, manifest):
         raise SystemExit("当前 best 的验证收据内容未通过机械复核")
     archive = args.best_dir / "submission.zip"
-    input_file = args.best_dir / "input.csv"
-    result = args.best_dir / "result.csv"
-    if not result.exists():
-        raise SystemExit("best 缺少 result.csv")
-    result_frame = pd.read_csv(result)
-    validation = validate_submission_frame(result_frame)
-    if args.input_file:
-        source_input = pd.read_csv(args.input_file)
-        quality_input, _ = prepare_submission_input(
+    try:
+        source_result = _find_source_file(args.best_dir, ("result.csv", "s_result.csv"))
+    except FileNotFoundError as exc:
+        raise SystemExit("best 缺少 result.csv 或 s_result.csv") from exc
+
+    training_input = args.training_input or _training_input_from_manifest(manifest, args.best_dir)
+    causal_input = args.best_dir / "causal_model_input.csv"
+    causal_receipt = args.best_dir / CAUSAL_MODEL_INPUT_RECEIPT
+    if args.input_file is not None and training_input is None:
+        raise SystemExit(
+            "提供 --input-file 时必须同时提供 --training-input；"
+            "禁止以评分 input.csv 重新拟合 Q_CAUSAL 训练统计"
+        )
+    if training_input is not None:
+        source_input = args.input_file or args.best_dir / "input.csv"
+        if not source_input.is_file():
+            raise SystemExit(f"缺少评分 origin 输入: {source_input}")
+        chain = prepare_submission_chain(
+            training_input,
             source_input,
-            COMPETITION_QUALITY_POLICY,
+            source_result,
+            args.best_dir,
+            train_end=args.train_end,
+            policy=COMPETITION_QUALITY_POLICY,
         )
-        validate_submission_input(
-            quality_input,
-            result_frame,
-            quality_policy=COMPETITION_QUALITY_POLICY,
-            enforce_quality=True,
+    elif causal_input.is_file() and causal_receipt.is_file():
+        # 第二次执行复用首轮冻结的 Q_CAUSAL 输入，不重新拟合训练期统计。
+        chain = prepare_submission_from_frozen_causal_input(
+            causal_input,
+            causal_receipt,
+            source_result,
+            args.best_dir,
+            policy=COMPETITION_QUALITY_POLICY,
         )
-        quality_input.to_csv(input_file, index=False, encoding="utf-8")
-    if not input_file.exists():
-        raise SystemExit("best 缺少 input.csv；请用 --input-file 提供同一冻结模型的推理输入")
-    quality_input, quality_report = prepare_submission_input(
-        pd.read_csv(input_file),
-        COMPETITION_QUALITY_POLICY,
-    )
-    quality_input.to_csv(input_file, index=False, encoding="utf-8")
-    input_validation = validate_submission_input(
-        quality_input,
-        result_frame,
-        quality_policy=COMPETITION_QUALITY_POLICY,
-        enforce_quality=True,
-    )
+    else:
+        raise SystemExit(
+            "缺少训练期质量输入；请提供 --training-input，或保留已验证的 "
+            "causal_model_input.csv 与 causal_model_input_receipt.json。"
+            "正式链禁止以提交输入重新拟合 Q_CAUSAL。"
+        )
+
+    input_file = Path(chain["input_path"])
+    result = Path(chain["result_path"])
+    causal_input = Path(chain["causal_input_path"])
+    causal_receipt = Path(chain["causal_receipt_path"])
+    quality_receipt = Path(chain["quality_receipt_path"])
+    result_freeze = chain["result_freeze"]
+    validation = chain["result_validation"]
+    input_validation = chain["input_validation"]
     if int(validation["rows"]) != 192 or int(validation["prediction_columns"]) != 16:
         raise SystemExit(f"提交结果尺寸不符合要求: {validation}")
-    package_submission(
+    archive_report = package_submission(
         input_file,
         result,
         archive,
-        quality_policy=COMPETITION_QUALITY_POLICY,
+        quality_receipt_path=quality_receipt,
+        result_freeze=result_freeze,
     )
     archive_validation = validate_submission_archive(
         archive,
         expected_input_path=input_file,
         expected_result_path=result,
-        quality_policy=COMPETITION_QUALITY_POLICY,
+        quality_receipt_path=quality_receipt,
+        result_freeze=result_freeze,
     )
     if any(character in args.team_name for character in '<>:"/\\|?*') or not args.team_name.strip():
         raise SystemExit("队伍名称为空或含 Windows 文件名非法字符")
@@ -259,9 +318,22 @@ def main() -> None:
     target_archive = args.output_dir / f"{args.team_name}_gas_predict_prelim.zip"
     target_input = args.output_dir / "input.csv"
     target_result = args.output_dir / "s_result.csv"
-    shutil.copy2(archive, target_archive)
-    shutil.copy2(input_file, target_input)
-    shutil.copy2(result, target_result)
+    target_causal_input = args.output_dir / causal_input.name
+    target_causal_receipt = args.output_dir / CAUSAL_MODEL_INPUT_RECEIPT
+    target_quality_receipt = args.output_dir / SUBMISSION_QUALITY_RECEIPT
+    _copy_if_distinct(archive, target_archive)
+    _copy_if_distinct(input_file, target_input)
+    _copy_if_distinct(result, target_result)
+    _copy_if_distinct(causal_input, target_causal_input)
+    _copy_if_distinct(causal_receipt, target_causal_receipt)
+    _copy_if_distinct(quality_receipt, target_quality_receipt)
+    validate_submission_archive(
+        target_archive,
+        expected_input_path=target_input,
+        expected_result_path=target_result,
+        quality_receipt_path=target_quality_receipt,
+        result_freeze=result_freeze,
+    )
     pooled = float(manifest["pooled_mape"])
     hashes = manifest.get("hashes", {})
     if not isinstance(hashes, dict):
@@ -284,7 +356,10 @@ def main() -> None:
         "validation": validation,
         "input": input_validation,
         "archive": archive_validation,
-        "quality_repair": quality_report,
+        "archive_package": archive_report,
+        "causal_model_input_receipt": CAUSAL_MODEL_INPUT_RECEIPT,
+        "submission_quality_receipt": SUBMISSION_QUALITY_RECEIPT,
+        "result_freeze": result_freeze,
     }
     write_json(args.best_dir / "submission.json", submission_receipt)
     write_json(args.best_dir / "manifest.json", manifest)
@@ -299,6 +374,8 @@ def main() -> None:
         "zip_members": list(SUBMISSION_MEMBERS),
         "input_validation": input_validation,
         "validation": validation,
+        "causal_model_input_receipt": str(target_causal_receipt.resolve()),
+        "submission_quality_receipt": str(target_quality_receipt.resolve()),
     }
     write_json(args.output_dir / "summary.json", summary)
     explanation = (
@@ -310,7 +387,9 @@ def main() -> None:
         "请上传：\n"
         f"{target_archive.name}\n\n"
         "不要上传：\n"
-        "单独的 input.csv 或 s_result.csv\nmodel.joblib\nresults/raw/runs 下的任何实验目录\n"
+        "单独的 input.csv 或 s_result.csv\nmodel.joblib\nresults/raw/runs 下的任何实验目录\n\n"
+        "同目录的 causal_model_input_receipt.json 与 submission_quality_receipt.json "
+        "用于审计，不需要上传到平台。\n"
     )
     (args.output_dir / "提交说明.txt").write_text(explanation, encoding="utf-8")
     if not args.no_open and os.name == "nt":

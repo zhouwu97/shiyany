@@ -354,6 +354,7 @@ class DirectDeltaForecaster:
         self.feature_columns_: tuple[str, ...] = ()
         self.states_: dict[tuple[str, int, str], _ModelState] = {}
         self.trace_: list[dict[str, object]] = []
+        self.last_prediction_metadata_: dict[str, object] = {}
 
     def fit(
         self,
@@ -448,6 +449,53 @@ class DirectDeltaForecaster:
         result = pd.DataFrame(output, index=features.index)
         _apply_capacity_constraints(result)
         return result
+
+    def predict_at_origin(
+        self,
+        history_until_origin: pd.DataFrame,
+        *,
+        model_name: str = "ridge",
+        price_schedule: object | None = None,
+        price_known_in_advance: bool = False,
+    ) -> pd.DataFrame:
+        """只以当前 origin 及其历史构造一行 A64 预测。
+
+        这是 P3 正式集成使用的入口。它不接受整段评分期特征矩阵，因而未来
+        generator、gas、holder 或 users 行无法进入特征构造或 ``predict``。
+        """
+
+        if not isinstance(history_until_origin.index, pd.DatetimeIndex):
+            raise TypeError("history_until_origin 必须使用 DatetimeIndex")
+        if (
+            history_until_origin.empty
+            or not history_until_origin.index.is_monotonic_increasing
+            or not history_until_origin.index.is_unique
+        ):
+            raise ValueError("history_until_origin 时间轴必须非空、唯一且递增")
+        if self.config.allow_future_price and price_schedule is not None and not price_known_in_advance:
+            raise ValueError("A64 未提供 origin 已知证明时禁止未来电价")
+        origin = pd.Timestamp(history_until_origin.index[-1])
+        features = build_direct_delta_features(
+            history_until_origin,
+            price_schedule=price_schedule,
+            allow_future_price=self.config.allow_future_price,
+            price_known_in_advance=price_known_in_advance,
+            include_nonlinear_state=self.config.enable_nonlinear_state,
+        )
+        if not isinstance(features, pd.DataFrame):
+            raise RuntimeError("A64 单 origin 特征构造没有返回 DataFrame")
+        prediction = self.predict(
+            features.loc[[origin]],
+            history_until_origin.loc[[origin], list(self.config.targets)],
+            model_name=model_name,
+        )
+        self.last_prediction_metadata_ = {
+            "origin": origin,
+            "history_rows": int(len(history_until_origin)),
+            "used_future_observations": False,
+            "model": model_name,
+        }
+        return prediction
 
 
 def _apply_capacity_constraints(output: pd.DataFrame) -> None:
@@ -581,6 +629,7 @@ def build_direct_delta_oof(
     folds: Sequence[TimeFold] | None = None,
     include_blind: bool = False,
     nested: bool = True,
+    origin_only: bool = False,
 ) -> tuple[pd.DataFrame, dict[str, object]]:
     """严格滚动 OOF；默认只使用 development 折，永不自动读取 blind。"""
 
@@ -590,6 +639,8 @@ def build_direct_delta_oof(
     deltas = build_direct_delta_targets(frame, config.targets, config.horizons)
     if include_blind:
         raise ValueError("A64 路线不读取 blind 标签；只允许 development OOF")
+    if origin_only and config.allow_future_price:
+        raise ValueError("A64 正式逐 origin OOF 不允许未来电价")
     all_folds = (
         list(folds)
         if folds is not None
@@ -607,16 +658,43 @@ def build_direct_delta_oof(
         if len(train_index) < config.min_train_rows:
             trace.append({"event": "fold_skip", "fold": fold.name, "reason": "训练样本不足"})
             continue
+        train_features = (
+            build_direct_delta_features(
+                frame.loc[train_mask],
+                include_nonlinear_state=config.enable_nonlinear_state,
+            )
+            if origin_only
+            else features.loc[train_mask]
+        )
+        if not isinstance(train_features, pd.DataFrame):
+            raise RuntimeError("A64 训练特征构造没有返回 DataFrame")
         model = DirectDeltaForecaster(config).fit(
-            features.loc[train_mask],
+            train_features,
             deltas.loc[train_mask],
             frame.loc[train_mask, list(config.targets)],
             train_end=fold.train_end,
         )
-        predictions = {
-            name: model.predict(features.loc[validation_mask], frame.loc[validation_mask, list(config.targets)], model_name=name)
-            for name in MODEL_NAMES
-        }
+        validation_origins = frame.index[validation_mask]
+        if origin_only:
+            predictions = {
+                name: pd.concat(
+                    [
+                        model.predict_at_origin(frame.loc[:origin], model_name=name)
+                        for origin in validation_origins
+                    ],
+                    axis=0,
+                )
+                for name in MODEL_NAMES
+            }
+        else:
+            predictions = {
+                name: model.predict(
+                    features.loc[validation_mask],
+                    frame.loc[validation_mask, list(config.targets)],
+                    model_name=name,
+                )
+                for name in MODEL_NAMES
+            }
         rows_parts.append(_fold_rows(frame, fold, predictions, config))
         trace.extend({"fold": fold.name, **item} for item in model.trace_)
         if nested:
@@ -640,6 +718,7 @@ def build_direct_delta_oof(
         "blind_included": False,
         "blind_labels_used": False,
         "nested_cross_fitting": bool(nested),
+        "origin_only_prediction": bool(origin_only),
         "trace_rows": int(len(trace)),
         "trace": trace,
     }
