@@ -84,6 +84,61 @@ class IQRRepair:
     passes: int = 0
 
 
+@dataclass(frozen=True)
+class FrozenColumnQuality:
+    """训练期冻结的单列质量统计，不在评分期重新估计。"""
+
+    column: str
+    kind: str
+    retained: bool
+    valid: bool
+    constant: bool
+    duplicate_of: str | None
+    median: float | None
+    lower: float | None
+    upper: float | None
+    apply_iqr_clip: bool
+
+
+@dataclass(frozen=True)
+class FittedSubmissionQualityPolicy:
+    """只由 ``train_end`` 之前生产观测拟合的提交质量策略。"""
+
+    policy: SubmissionQualityPolicy
+    training_rows: int
+    training_start: str
+    training_end: str
+    retained_columns: tuple[str, ...]
+    missing_required_raw_columns: tuple[str, ...]
+    dropped_raw_columns: tuple[str, ...]
+    dropped_invalid_columns: tuple[str, ...]
+    dropped_constant_columns: tuple[str, ...]
+    dropped_duplicate_columns: tuple[tuple[str, str], ...]
+    columns: tuple[FrozenColumnQuality, ...]
+
+    def column_map(self) -> dict[str, FrozenColumnQuality]:
+        """返回冻结列统计的副本，调用方不能修改策略本身。"""
+
+        return {item.column: item for item in self.columns}
+
+    def to_dict(self) -> dict[str, object]:
+        """导出可审计收据，避免把 pandas 对象写进运行结果。"""
+
+        return {
+            "policy": asdict(self.policy),
+            "training_rows": self.training_rows,
+            "training_start": self.training_start,
+            "training_end": self.training_end,
+            "retained_columns": list(self.retained_columns),
+            "missing_required_raw_columns": list(self.missing_required_raw_columns),
+            "dropped_raw_columns": list(self.dropped_raw_columns),
+            "dropped_invalid_columns": list(self.dropped_invalid_columns),
+            "dropped_constant_columns": list(self.dropped_constant_columns),
+            "dropped_duplicate_columns": [list(item) for item in self.dropped_duplicate_columns],
+            "columns": [asdict(item) for item in self.columns],
+        }
+
+
 def raw_columns(frame: pd.DataFrame) -> list[str]:
     """返回不含 ``datetime`` 且未使用 ``feat_`` 前缀的字段。"""
 
@@ -119,6 +174,304 @@ def _outside_iqr_bounds(numeric: pd.Series, lower: float, upper: float) -> pd.Se
 
     tolerance = max(1e-9, max(abs(lower), abs(upper), 1.0) * 1e-12)
     return numeric.lt(lower - tolerance) | numeric.gt(upper + tolerance)
+
+
+def _training_slice(
+    training_frame: pd.DataFrame,
+    train_end: str | pd.Timestamp | None,
+) -> tuple[pd.DataFrame, pd.Series]:
+    """只截取 ``train_end`` 之前的生产观测，并返回解析后的时间列。"""
+
+    if "datetime" not in training_frame.columns:
+        raise ValueError("训练质量帧缺少 datetime")
+    if training_frame.columns.duplicated().any():
+        raise ValueError("训练质量帧含重复字段")
+    timestamps = pd.to_datetime(training_frame["datetime"], errors="coerce")
+    if timestamps.isna().any():
+        raise ValueError("训练质量帧 datetime 含非法时间戳")
+    if train_end is not None:
+        cutoff = pd.Timestamp(train_end)
+        if pd.isna(cutoff):
+            raise ValueError("train_end 不是合法时间戳")
+        mask = timestamps.le(cutoff)
+        if not bool(mask.any()):
+            raise ValueError("train_end 之前没有可用于拟合质量策略的生产观测")
+        selected = training_frame.loc[mask].copy()
+        selected_times = timestamps.loc[mask]
+    else:
+        selected = training_frame.copy()
+        selected_times = timestamps
+    if selected.empty:
+        raise ValueError("训练质量帧为空")
+    return selected, selected_times
+
+
+def _finite_numeric(values: pd.Series) -> tuple[pd.Series, np.ndarray]:
+    """把一列转成数值，并显式区分有限值与无效值。"""
+
+    numeric = pd.to_numeric(values, errors="coerce")
+    array = numeric.to_numpy(dtype=float, na_value=np.nan)
+    finite = np.isfinite(array)
+    return numeric, finite
+
+
+def fit_quality_policy(
+    training_frame: pd.DataFrame,
+    policy: SubmissionQualityPolicy = COMPETITION_QUALITY_POLICY,
+    *,
+    train_end: str | pd.Timestamp | None = None,
+) -> FittedSubmissionQualityPolicy:
+    """在生产训练期冻结质量规则。
+
+    统计量、有效性、常数列和重复列均只从 ``training_frame`` 中
+    ``datetime <= train_end`` 的行计算。评分期不得调用此函数重新拟合，
+    而应把返回对象传给 :func:`transform_submission_input`。
+    """
+
+    train, timestamps = _training_slice(training_frame, train_end)
+    allowed = set(policy.allowed_raw_columns)
+    required = set(policy.required_raw_columns)
+    actual_raw = raw_columns(train)
+    dropped_raw = tuple(sorted(column for column in actual_raw if column not in allowed))
+    missing_required = tuple(sorted(column for column in required if column not in actual_raw))
+
+    # 训练期保留顺序，确保生成的 input.csv 与模型/平台契约稳定一致。
+    candidates = [
+        str(column)
+        for column in train.columns
+        if column == "datetime"
+        or str(column) in allowed
+        or str(column).startswith("feat_")
+    ]
+    feature_stats: list[FrozenColumnQuality] = []
+    dropped_invalid: list[str] = []
+    dropped_constant: list[str] = []
+    dropped_duplicate: list[tuple[str, str]] = []
+    retained_numeric: dict[str, pd.Series] = {}
+    retained_columns: list[str] = []
+
+    for column in candidates:
+        if column == "datetime":
+            continue
+        numeric, finite = _finite_numeric(train[column])
+        finite_values = numeric.iloc[np.flatnonzero(finite)].astype(float)
+        is_feature = column.startswith("feat_")
+        is_required_raw = column in required
+        has_valid = bool(finite.any())
+        constant = has_valid and int(finite_values.nunique(dropna=True)) <= 1
+        duplicate_of: str | None = None
+        if has_valid:
+            for previous, previous_values in retained_numeric.items():
+                if numeric.equals(previous_values):
+                    duplicate_of = previous
+                    break
+
+        if not has_valid:
+            dropped_invalid.append(column)
+        if constant and is_feature:
+            dropped_constant.append(column)
+        if duplicate_of is not None and is_feature:
+            dropped_duplicate.append((column, duplicate_of))
+
+        # 必需 raw 列必须保留；派生/可选 raw 的坏列在训练期冻结时移除。
+        retained = has_valid and not (
+            (constant or duplicate_of is not None) and not is_required_raw
+        )
+        if not has_valid and is_required_raw:
+            retained = True
+        if retained:
+            retained_columns.append(column)
+            retained_numeric[column] = numeric
+
+        median: float | None = None
+        lower: float | None = None
+        upper: float | None = None
+        if has_valid:
+            finite_array = finite_values.to_numpy(dtype=float)
+            median = float(np.median(finite_array))
+            bounds = _iqr_bounds(train[column], policy)
+            if bounds is not None and (
+                column in policy.batch_iqr_clip_columns or is_feature
+            ):
+                lower, upper = bounds
+        kind = "feature" if is_feature else "raw"
+        if not has_valid:
+            kind = "invalid"
+        elif constant:
+            kind = "constant"
+        elif duplicate_of is not None:
+            kind = "duplicate"
+        feature_stats.append(
+            FrozenColumnQuality(
+                column=column,
+                kind=kind,
+                retained=retained,
+                valid=has_valid,
+                constant=constant,
+                duplicate_of=duplicate_of,
+                median=median,
+                lower=lower,
+                upper=upper,
+                apply_iqr_clip=lower is not None and upper is not None,
+            )
+        )
+
+    return FittedSubmissionQualityPolicy(
+        policy=policy,
+        training_rows=len(train),
+        training_start=str(timestamps.iloc[0]),
+        training_end=str(timestamps.iloc[-1]),
+        retained_columns=tuple(retained_columns),
+        missing_required_raw_columns=missing_required,
+        dropped_raw_columns=dropped_raw,
+        dropped_invalid_columns=tuple(sorted(dropped_invalid)),
+        dropped_constant_columns=tuple(sorted(dropped_constant)),
+        dropped_duplicate_columns=tuple(dropped_duplicate),
+        columns=tuple(feature_stats),
+    )
+
+
+def _audit_fitted_quality(
+    input_frame: pd.DataFrame,
+    fitted_policy: FittedSubmissionQualityPolicy,
+) -> dict[str, object]:
+    """用冻结边界审计评分输入；此函数不从评分行估计任何统计量。"""
+
+    policy = fitted_policy.policy
+    actual_raw = raw_columns(input_frame)
+    actual_features = feature_columns(input_frame)
+    allowed = set(policy.allowed_raw_columns)
+    required = set(policy.required_raw_columns)
+    unexpected_raw = sorted(column for column in actual_raw if column not in allowed)
+    missing_raw = sorted(column for column in required if column not in actual_raw)
+    stats = fitted_policy.column_map()
+    invalid_cells: dict[str, int] = {}
+    iqr_violations: dict[str, int] = {}
+    for column in fitted_policy.retained_columns:
+        if column not in input_frame.columns:
+            continue
+        numeric, finite = _finite_numeric(input_frame[column])
+        invalid_cells[column] = int((~finite).sum())
+        item = stats[column]
+        if item.apply_iqr_clip and item.lower is not None and item.upper is not None:
+            iqr_violations[column] = int(
+                _outside_iqr_bounds(numeric, item.lower, item.upper).fillna(False).sum()
+            )
+    missing_columns = sorted(
+        column for column in fitted_policy.retained_columns if column not in input_frame.columns
+    )
+    return {
+        "policy": policy.name,
+        "frozen": True,
+        "training_end": fitted_policy.training_end,
+        "raw_columns": actual_raw,
+        "raw_column_count": len(actual_raw),
+        "feature_column_count": len(actual_features),
+        "unexpected_raw_columns": unexpected_raw,
+        "missing_required_raw_columns": missing_raw,
+        "missing_frozen_columns": missing_columns,
+        "constant_raw_columns": [],
+        "invalid_cells_by_column": invalid_cells,
+        "total_invalid_cells": int(sum(invalid_cells.values())),
+        "iqr_violations": iqr_violations,
+        "iqr_bounds": {
+            column: {"lower": stats[column].lower, "upper": stats[column].upper}
+            for column in iqr_violations
+            if stats[column].lower is not None and stats[column].upper is not None
+        },
+        "total_iqr_violations": int(sum(iqr_violations.values())),
+    }
+
+
+def transform_submission_input(
+    scoring_origin_rows: pd.DataFrame,
+    fitted_policy: FittedSubmissionQualityPolicy,
+    *,
+    strict: bool = True,
+) -> tuple[pd.DataFrame, dict[str, object]]:
+    """将评分起点按训练期冻结策略逐元素变换。
+
+    任何缺失/裁剪决策都只读取冻结的中位数与 IQR 边界，
+    不读取评分未来分布或标签。
+    """
+
+    if not isinstance(scoring_origin_rows, pd.DataFrame) or not isinstance(
+        fitted_policy, FittedSubmissionQualityPolicy
+    ):
+        raise TypeError("需要 scoring_origin_rows 和 fitted_policy")
+    if "datetime" not in scoring_origin_rows.columns:
+        raise ValueError("评分质量帧缺少 datetime")
+    if scoring_origin_rows.columns.duplicated().any():
+        raise ValueError("评分质量帧含重复字段")
+
+    policy = fitted_policy.policy
+    stats = fitted_policy.column_map()
+    output = pd.DataFrame({"datetime": scoring_origin_rows["datetime"].copy()})
+    invalid_cells: dict[str, int] = {}
+    clipped_cells: dict[str, int] = {}
+    added_columns: list[str] = []
+
+    for column in fitted_policy.retained_columns:
+        item = stats[column]
+        if column in scoring_origin_rows.columns:
+            values = scoring_origin_rows[column]
+            numeric, finite = _finite_numeric(values)
+        else:
+            values = pd.Series(np.nan, index=scoring_origin_rows.index)
+            numeric, finite = _finite_numeric(values)
+            added_columns.append(column)
+        if item.median is None:
+            if not finite.all():
+                if column in policy.required_raw_columns and strict:
+                    raise ValueError(f"必需 raw 字段 {column} 没有可用训练期中位数")
+                replacement = 0.0
+            else:
+                replacement = None
+        else:
+            replacement = item.median
+        transformed = numeric.astype(float).copy()
+        invalid_mask = ~finite
+        invalid_cells[column] = int(invalid_mask.sum())
+        if bool(invalid_mask.any()):
+            if replacement is None:
+                if strict:
+                    raise ValueError(f"字段 {column} 含训练期无法修复的无效值")
+            else:
+                transformed.loc[invalid_mask] = replacement
+        clipped = pd.Series(False, index=transformed.index)
+        if item.apply_iqr_clip and item.lower is not None and item.upper is not None:
+            clipped = transformed.lt(item.lower) | transformed.gt(item.upper)
+            transformed = transformed.clip(lower=item.lower, upper=item.upper)
+        clipped_cells[column] = int(clipped.fillna(False).sum())
+        output[column] = transformed
+
+    if strict:
+        missing_required = [
+            column for column in policy.required_raw_columns if column not in output.columns
+        ]
+        if missing_required:
+            raise ValueError(f"评分输入缺少必需 raw 字段: {missing_required}")
+        values = output.drop(columns=["datetime"]).to_numpy(dtype=float)
+        if not np.isfinite(values).all():
+            raise ValueError("质量变换后仍含无效输入值")
+
+    audit = _audit_fitted_quality(output, fitted_policy)
+    report = {
+        "policy": policy.name,
+        "frozen": True,
+        "training_end": fitted_policy.training_end,
+        "scoring_rows": len(scoring_origin_rows),
+        "dropped_raw_columns": list(fitted_policy.dropped_raw_columns),
+        "dropped_invalid_columns": list(fitted_policy.dropped_invalid_columns),
+        "dropped_constant_columns": list(fitted_policy.dropped_constant_columns),
+        "dropped_duplicate_columns": [list(item) for item in fitted_policy.dropped_duplicate_columns],
+        "added_columns": added_columns,
+        "invalid_cells_by_column": invalid_cells,
+        "clipped_cells_by_column": clipped_cells,
+        "repaired_cells": int(sum(invalid_cells.values()) + sum(clipped_cells.values())),
+        "audit": audit,
+    }
+    return output, report
 
 
 def audit_submission_quality(
@@ -205,6 +558,22 @@ def prepare_submission_input(
     if input_frame.columns.duplicated().any():
         raise ValueError("input.csv 含重复字段")
 
+    # 兼容旧调用方：旧接口在传入的当前帧上拟合一次，然后立即做纯变换。
+    # 生产代码若已有训练期，应显式调用 fit_quality_policy 并复用其结果。
+    fitted = fit_quality_policy(input_frame, policy)
+    output, report = transform_submission_input(input_frame, fitted, strict=strict)
+    report["legacy_fit_on_input"] = True
+    return output, report
+
+
+def _prepare_submission_input_legacy_batch(
+    input_frame: pd.DataFrame,
+    policy: SubmissionQualityPolicy,
+    *,
+    strict: bool,
+) -> tuple[pd.DataFrame, dict[str, object]]:
+    """保留历史批次算法，仅供旧报告复现；正式入口不再使用。"""
+
     original_raw = raw_columns(input_frame)
     allowed = set(policy.allowed_raw_columns)
     retained_columns = [
@@ -287,7 +656,7 @@ def prepare_full_matrix_submission_input(
     zscore_threshold: float = 3.0,
     max_iqr_passes: int = 10,
 ) -> tuple[pd.DataFrame, dict[str, object]]:
-    """在提交副本上执行全矩阵质量归一化，不改变预测结果。"""
+    """历史质量消融：评分矩阵统计只用于非生产 Q3 对照。"""
 
     if iqr_multiplier <= 0.0 or not 0.0 < clip_iqr_multiplier < iqr_multiplier:
         raise ValueError("全矩阵 IQR 裁剪倍数必须满足 0 < clip < gate")
@@ -298,7 +667,8 @@ def prepare_full_matrix_submission_input(
     if not interpolations or not set(interpolations).issubset(supported):
         raise ValueError("全矩阵质量包含不支持的分位数插值方法")
 
-    output, base_report = prepare_submission_input(input_frame, policy)
+    fitted = fit_quality_policy(input_frame, policy)
+    output, base_report = transform_submission_input(input_frame, fitted)
     required_raw = set(policy.required_raw_columns)
 
     def numeric_frame(frame: pd.DataFrame) -> pd.DataFrame:
@@ -365,23 +735,27 @@ def prepare_full_matrix_submission_input(
             "duplicate_columns": duplicate_records(frame),
         }
 
-    initial_quality = outlier_report(output)
-    constant_columns = [
-        column
-        for column in initial_quality["constant_columns"]
-        if column.startswith("feat_")
-    ]
+    initial_quality = outlier_report(input_frame.loc[:, [
+        column for column in input_frame.columns if column != "datetime"
+    ]].assign(datetime=input_frame["datetime"]))
+    constant_columns = list(fitted.dropped_constant_columns)
     if constant_columns:
-        output = output.drop(columns=constant_columns)
+        output = output.drop(columns=constant_columns, errors="ignore")
     duplicate_columns = [
-        item
-        for item in duplicate_records(output)
-        if item["column"].startswith("feat_")
+        {"column": column, "duplicate_of": duplicate_of}
+        for column, duplicate_of in fitted.dropped_duplicate_columns
     ]
     if duplicate_columns:
-        output = output.drop(columns=[item["column"] for item in duplicate_columns])
+        output = output.drop(
+            columns=[item["column"] for item in duplicate_columns],
+            errors="ignore",
+        )
 
-    winsorized_by_column: dict[str, int] = {}
+    winsorized_by_column: dict[str, int] = {
+        column: int(count)
+        for column, count in base_report.get("clipped_cells_by_column", {}).items()
+        if int(count) > 0
+    }
     winsorization_passes: list[dict[str, object]] = []
     dropped_after_winsor: list[str] = []
     for pass_number in range(1, max_iqr_passes + 1):
@@ -446,6 +820,8 @@ def prepare_full_matrix_submission_input(
 
     return output, {
         "policy": f"{policy.name}_full_matrix_v1",
+        "production_eligible": False,
+        "reason": "全矩阵统计依赖评分期分布，仅允许固定结果的历史质量消融",
         "base_quality": base_report,
         "initial_quality": initial_quality,
         "dropped_constant_columns": constant_columns,

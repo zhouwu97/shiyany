@@ -217,7 +217,7 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# 赛事数据受使用协议限制，不进入公共仓库
+# 赛事数据受使用协议限制，不进入公共仓库；长期汇总指标仍保留跟踪。
 data/raw/
 煤气发电预测优化-初赛训练和测试集/
 data/interim/
@@ -228,10 +228,13 @@ runs/
 .tmp/
 results/raw/*
 !results/raw/.gitkeep
+results/**/input.csv
+results/**/s_result.csv
 results/best/
 results/latest/
 results/research_v2/**/*.parquet
-提交这个/
+提交这个*/
+**/submission.zip
 *.pdf
 *.zip
 注意事项.txt

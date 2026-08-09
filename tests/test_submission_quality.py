@@ -17,8 +17,10 @@ from gas_forecast.submission_quality import (
     COMPETITION_QUALITY_POLICY,
     audit_submission_quality,
     enforce_submission_quality,
+    fit_quality_policy,
     prepare_full_matrix_submission_input,
     prepare_submission_input,
+    transform_submission_input,
 )
 
 
@@ -136,3 +138,72 @@ def test_full_matrix_quality_winsorizes_derived_features() -> None:
     assert prepared["feat_outlier"].iloc[-1] < 1000.0
     assert report["winsorized_cells"] >= 1
     assert report["final_quality"]["iqr_outlier_cells_all_methods"] == 0
+    assert report["production_eligible"] is False
+
+
+def test_fitted_quality_is_unchanged_by_scoring_tail_perturbation() -> None:
+    training = pd.DataFrame(
+        {
+            "datetime": pd.date_range("2025-01-01", periods=8, freq="15min").astype(str),
+            "generator_1": [90.0, 95.0, 100.0, 105.0, 110.0, 115.0, 120.0, 125.0],
+            "feat_signal": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+        }
+    )
+    policy = _policy()
+    fitted = fit_quality_policy(training, policy, train_end="2025-01-01 01:15")
+    scoring = training.iloc[-3:].copy()
+    altered = scoring.copy()
+    altered["generator_1"] = [10_000.0, -10_000.0, 50.0]
+    transformed, _ = transform_submission_input(scoring, fitted)
+    altered_transformed, altered_report = transform_submission_input(altered, fitted)
+
+    assert fitted.training_rows == 6
+    assert fitted.training_end == "2025-01-01 01:15:00"
+    assert fitted.to_dict()["training_rows"] == 6
+    assert transformed.columns.tolist() == altered_transformed.columns.tolist()
+    # 规则相同；只有当前评分行被确定性地修复，不会重新估计边界。
+    assert altered_report["training_end"] == fitted.training_end
+    assert altered_report["audit"]["iqr_bounds"]["generator_1"] == {
+        "lower": 83.75,
+        "upper": 121.25,
+    }
+    assert altered_transformed["generator_1"].tolist() == [121.25, 83.75, 83.75]
+
+
+def test_fitted_quality_freezes_invalid_constant_and_duplicate_features() -> None:
+    training = pd.DataFrame(
+        {
+            "datetime": pd.date_range("2025-01-01", periods=6, freq="15min").astype(str),
+            "generator_1": [90.0, 95.0, 100.0, 105.0, 110.0, 115.0],
+            "feat_constant": [1.0] * 6,
+            "feat_duplicate": [90.0, 95.0, 100.0, 105.0, 110.0, 115.0],
+            "feat_invalid": ["bad"] * 6,
+        }
+    )
+    fitted = fit_quality_policy(training, _policy())
+    assert "feat_constant" in fitted.dropped_constant_columns
+    assert ("feat_duplicate", "generator_1") in fitted.dropped_duplicate_columns
+    assert "feat_invalid" in fitted.dropped_invalid_columns
+
+    scoring = training.iloc[:2].copy()
+    scoring["feat_constant"] = [99.0, 100.0]
+    scoring["feat_duplicate"] = [1_000.0, 2_000.0]
+    scoring["feat_invalid"] = ["future", "future"]
+    transformed, report = transform_submission_input(scoring, fitted)
+    assert "feat_constant" not in transformed.columns
+    assert "feat_duplicate" not in transformed.columns
+    assert "feat_invalid" not in transformed.columns
+    assert report["dropped_constant_columns"] == ["feat_constant"]
+    assert report["dropped_invalid_columns"] == ["feat_invalid"]
+
+
+def test_transform_does_not_require_result_labels_or_future_production_values() -> None:
+    training = _input_frame().drop(columns="air_heater_5")
+    fitted = fit_quality_policy(training, _policy(), train_end=training["datetime"].iloc[5])
+    scoring = training.iloc[6:].copy()
+    baseline, _ = transform_submission_input(scoring, fitted)
+    future_changed = scoring.copy()
+    future_changed.loc[:, "generator_1"] = -9999.0
+    changed, _ = transform_submission_input(future_changed, fitted)
+    assert baseline.columns.tolist() == changed.columns.tolist()
+    assert np.isfinite(changed.iloc[:, 1:].to_numpy(dtype=float)).all()
