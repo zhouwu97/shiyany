@@ -235,3 +235,11 @@
 - A61 pooled MAPE 为 `5.195745%`；P1、Matured、Analog、A64 分别为 `5.543435%`、`6.575605%`、`5.504724%`、`5.328928%`。leave-one-fold-out 静态融合得到 `5.159141%`，相对 A61 改善 `0.036604pp`，赢 `16/19` 折、recent5 赢 `4/5`，两个目标均改善。
 - 预注册稳定性门槛未全部通过：`dev_15` 退化 `0.125153pp`，超过最差折退化上限 `0.100pp`。因此决定为 `STOP_STATIC_FUSION`；不运行后续统一 future perturbation 晋级门禁、不生产重训、不读取 blind、不修改 `results/best/` 或正式提交。
 - 可追溯产物位于 `results/raw/runs/experiments/p3_rolling_training_20260809_190558/`，状态为 `OOF_PERFORMANCE_ONLY_FUTURE_GATE_PENDING`；该成绩是研究诊断，不是已发布 Champion。
+
+## 2026-08-09 P4 Robust Cross-Fitted Fusion（停止）
+
+- P4 不重训基础模型，只读取 P3 的 19 折 development OOF。输入审计确认 3,648 个 origin、58,368 行，A61、P1、Matured、Analog、A64 的完整 `fold/origin/train_end/target/horizon/actual` 键逐条一致，无 blind。
+- 每个 held fold 仅在其余 18 折上枚举 P3 原有 15 个预注册离散权重。每个候选先执行原固定门槛：pooled 改善至少 `0.020pp`、按时间排序的训练侧 recent5 至少胜 `3/5`、最差折退化至多 `0.100pp`、任一目标退化至多 `0.100pp`；仅通过者按训练侧 pooled MAPE 和稳定名称选择，无通过者才回退 A61。
+- 交叉拟合结果的 pooled MAPE 为 `5.188403%`，相对 A61 的 `5.195745%` 改善 `0.007342pp`；赢 `13/19` 折，recent5 胜 `4/5`，`generator_1` 和 `generator_all` 分别改善 `0.005825pp`、`0.008859pp`。
+- 最终原 `static_fusion_gate` 未通过：pooled 改善低于 `0.020pp`，且最差折仍退化 `0.125153pp > 0.100pp`。因此状态为 `STOP_STATIC_FUSION`，不能标记 `ROBUST_STATIC_ELIGIBLE`；未运行 future perturbation、blind、基础模型重训或生产晋级，也未修改 `results/best` 和正式提交。
+- 逐折选择中，14 折使用 `80% A61 + 10% A64 + 10% Analog`，`dev_06/dev_13` 使用 `90% A61 + 10% A64`，`dev_10` 使用 `80% A61 + 10% A64 + 10% Matured`，`dev_15` 使用 `80% A61 + 20% A64`。完整 285 行候选轨迹和逐折权重位于 `results/raw/runs/experiments/p4_robust_cross_fit_20260809_203500/`。

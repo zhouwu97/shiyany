@@ -542,3 +542,40 @@ P3 复用 A61 verification 的 19 个 development 折，实际覆盖 3,648 个�
 | P3 cross-fitted static | **5.159141%** | **94.840859%** | **-0.036604pp** |
 
 P3 静态融合在 pooled、目标和 recent5 上有效：赢 `16/19` 折、recent5 赢 `4/5`，`generator_1` 与 `generator_all` 分别改善 `0.029906pp` 和 `0.043303pp`。但 `dev_15` 退化 `0.125153pp`，超过预注册 `0.100pp` 最差折上限，因此 `static_gate.passed=false`、状态为 `STOP_STATIC_FUSION`。该结果不触发未来门禁、生产重训或 Champion 覆盖。
+
+## 2026-08-09 P4 Robust Cross-Fitted Fusion
+
+P4 只读取 `p3_rolling_training_20260809_190558` 的冻结 OOF，不重训任何基础模型。输入验证通过：19 折、3,648 个 origin、58,368 行、无 blind；四份原始路线 OOF 与 integration 的完整键均为 58,368 行完全一致。每个 held fold 的 15 个候选只在其余 18 折上计算原稳定门槛，recent5 按训练侧时间顺序确定，held actual 只参与最终评分。
+
+| 指标 | A61 | P4 robust cross-fit | 改善 |
+| --- | ---: | ---: | ---: |
+| pooled MAPE | 5.195745% | 5.188403% | 0.007342pp |
+| `generator_1` | - | - | 0.005825pp |
+| `generator_all` | - | - | 0.008859pp |
+| 折胜数 | - | 13/19 | - |
+| recent5 | - | 4/5 | - |
+| 最差折退化 | - | 0.125153pp | - |
+
+| held fold | 训练侧冻结权重 |
+| --- | --- |
+| dev_01 | 80% A61 + 10% A64 + 10% Analog |
+| dev_02 | 80% A61 + 10% A64 + 10% Analog |
+| dev_03 | 80% A61 + 10% A64 + 10% Analog |
+| dev_04 | 80% A61 + 10% A64 + 10% Analog |
+| dev_05 | 80% A61 + 10% A64 + 10% Analog |
+| dev_06 | 90% A61 + 10% A64 |
+| dev_07 | 80% A61 + 10% A64 + 10% Analog |
+| dev_08 | 80% A61 + 10% A64 + 10% Analog |
+| dev_09 | 80% A61 + 10% A64 + 10% Analog |
+| dev_10 | 80% A61 + 10% A64 + 10% Matured |
+| dev_11 | 80% A61 + 10% A64 + 10% Analog |
+| dev_12 | 80% A61 + 10% A64 + 10% Analog |
+| dev_13 | 90% A61 + 10% A64 |
+| dev_14 | 80% A61 + 10% A64 + 10% Analog |
+| dev_15 | 80% A61 + 20% A64 |
+| dev_16 | 80% A61 + 10% A64 + 10% Analog |
+| dev_17 | 80% A61 + 10% A64 + 10% Analog |
+| dev_18 | 80% A61 + 10% A64 + 10% Analog |
+| dev_19 | 80% A61 + 10% A64 + 10% Analog |
+
+最终复用原 `static_fusion_gate`，其中 recent5 与目标回归通过，但 pooled 改善未达到 `0.020pp`，最差折退化也超过固定 `0.100pp`。机械结论为 `STOP_STATIC_FUSION`，不是 `ROBUST_STATIC_ELIGIBLE`。运行耗时 `19.435s`；未运行 future perturbation 或 blind，未重训基础模型，未修改 `results/best` 或正式提交。完整 OOF、285 行候选轨迹、逐折选择、报告及哈希位于 `results/raw/runs/experiments/p4_robust_cross_fit_20260809_203500/`。其中 `oof.parquet`、`candidate_trace.parquet`、`report.json` 的 SHA-256 分别为 `1118332ABD201B363DCAAACA00342AF6CA6381F81D6A7A7D554EE08C844998C6`、`51C5771D8B5EF06F17DA5FF45E8A9EF93AABB5686D45FC4B5C95DF26468273B0`、`96C27C733BD0030B8F96A51EBA3216DA4B3CA2CE34F78581ABA48506A6615CD7`。
