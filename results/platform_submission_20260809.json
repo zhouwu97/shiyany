@@ -1,0 +1,26 @@
+{
+  "recorded_at": "2026-08-09",
+  "submission": "提交这个_训练优化_复跑/咕咕嘎嘎_gas_predict_prelim.zip",
+  "split": "gas_power",
+  "horizons": [15, 30, 45, 60, 75, 90, 105, 120],
+  "quality": {
+    "score": 40.0,
+    "max_score": 50.0,
+    "miss": 10.0,
+    "dup": 5.0,
+    "out": 0.0,
+    "intv": 5.0,
+    "invalid_col": 0.0,
+    "feat": 5.0,
+    "comp": 15.0
+  },
+  "accuracy": {
+    "score": 49.9,
+    "max_score": 50.0,
+    "mape_generator_1": 0.0007,
+    "mape_generator_all": 0.0007
+  },
+  "total_score": 89.9,
+  "max_score": 100.0,
+  "source": "平台评分返回"
+}
