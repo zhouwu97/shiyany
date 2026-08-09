@@ -9,6 +9,10 @@ from gas_forecast.historical_analog import (
     HORIZONS,
     PRE_REGISTERED_SPECS,
     HistoricalAnalogSpec,
+    _predict_target_for_origins,
+    _prepare_targets,
+    _strict_candidate_positions,
+    _validate_frame,
     audit_historical_analog_future_perturbation,
     build_historical_analog_oof,
     predict_historical_analog_at_origin,
@@ -105,6 +109,8 @@ def test_outer_oof_keeps_trajectories_before_held_fold_and_uses_nested_selection
     assert result.report["blind_included"] is False
     assert result.report["nested_cross_fitting"] is True
     assert result.rows["selection_used_held_fold_labels"].eq(False).all()
+    assert result.rows["candidate_window_and_trajectory_before_train_cutoff"].all()
+    assert result.rows["candidate_trajectory_end_before_train_cutoff"].all()
     assert result.rows["candidate_trajectory_end_before_validation"].all()
     assert {
         "historical_analog_pred",
@@ -127,3 +133,41 @@ def test_screening_uses_the_first_five_development_folds_and_never_returns_blind
     assert all(not fold.blind for fold in screening)
     with pytest.raises(ValueError, match="禁止读取 blind"):
         select_historical_analog_folds(frame.index, config, scope="final")
+
+
+def test_candidate_future_trajectory_must_end_strictly_before_train_cutoff() -> None:
+    frame = _frame(periods=500)
+    prepared = _prepare_targets(frame, ("generator_1",))["generator_1"]
+    train_end = frame.index[300]
+    positions = _strict_candidate_positions(
+        prepared,
+        train_start=frame.index[0],
+        train_end=train_end,
+        validation_start=frame.index[380],
+        context=16,
+    )
+
+    # j+120min == train_end 是训练截止边界，必须排除；最后允许的位置
+    # 是再早一个 15 分钟刻度，且其第八步真值严格早于 train_end。
+    equal_boundary = frame.index.get_loc(train_end - pd.Timedelta(minutes=120))
+    last_safe = frame.index.get_loc(train_end - pd.Timedelta(minutes=135))
+    assert equal_boundary not in positions
+    assert last_safe in positions
+
+
+def test_candidate_time_gap_and_insufficient_history_fail_closed() -> None:
+    frame = _frame(periods=80)
+    gapped = pd.concat([frame.iloc[:40], frame.iloc[41:]])
+    with pytest.raises(ValueError, match="连续的 15 分钟"):
+        _validate_frame(gapped, ("generator_1", "generator_all"))
+
+    prepared = _prepare_targets(frame, ("generator_1",))["generator_1"]
+    with pytest.raises(ValueError, match="候选不足"):
+        _predict_target_for_origins(
+            prepared,
+            pd.DatetimeIndex([frame.index[70]]),
+            HistoricalAnalogSpec(32, 32),
+            train_start=frame.index[0],
+            train_end=frame.index[55],
+            validation_start=frame.index[70],
+        )
