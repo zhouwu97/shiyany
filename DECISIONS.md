@@ -205,3 +205,10 @@
 - 未来扰动测试要求：修改、shuffle、null、删除 origin 之后的全部生产数据时，Oracle
   输出允许变化并必须标注非因果；正式因果模型的 16 个预测仍须逐元素不变，不能用该
   Oracle 结果替代正式泄漏审计。
+
+## 2026-08-09 P3 Legal Causal Rolling Reconstruction（静态融合停止）
+
+- 使用 A61 verification 的 19 个冻结 development 折，对 3,648 个 origin、58,368 个目标×步长单元实际训练 P1 CausalRolling、P2 Matured Residual、P2 Strict Historical Analog 与 A64 Direct Delta；全程不读取 blind 或平台反馈。
+- A61 pooled MAPE 为 `5.195745%`；P1、Matured、Analog、A64 分别为 `5.543435%`、`6.575605%`、`5.504724%`、`5.328928%`。leave-one-fold-out 静态融合得到 `5.159141%`，相对 A61 改善 `0.036604pp`，赢 `16/19` 折、recent5 赢 `4/5`，两个目标均改善。
+- 预注册稳定性门槛未全部通过：`dev_15` 退化 `0.125153pp`，超过最差折退化上限 `0.100pp`。因此决定为 `STOP_STATIC_FUSION`；不运行后续统一 future perturbation 晋级门禁、不生产重训、不读取 blind、不修改 `results/best/` 或正式提交。
+- 可追溯产物位于 `results/raw/runs/experiments/p3_rolling_training_20260809_190558/`，状态为 `OOF_PERFORMANCE_ONLY_FUTURE_GATE_PENDING`；该成绩是研究诊断，不是已发布 Champion。

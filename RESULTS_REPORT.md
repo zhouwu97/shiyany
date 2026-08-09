@@ -493,3 +493,18 @@ A61 使用 A60 verification OOF 的 `a60_gall_long_blend_30_pred` 作为冻结�
 10% 不能因为总体分数最低而事后成为赢家：预注册保留条件要求 pooled 改善至少 `0.005pp`、recent5 至少 `3/5`、最差折退化至多 `0.100pp`，只有 5% 同时满足（最差折 `0.008925pp`）。ARX 单体虽退化，但与父模型的误差相关性在 g1/gall/pooled 上分别为 `0.904788/0.856765/0.859856`，因此低权重融合有合理的独立收益来源。
 
 两次同输入运行的 58,368 行 OOF 无 blind、无重复键，且 SHA-256 一致：`A5887C57EE4930F452D66FD6A8F231E125AF8B6DA86BA93083C3F8F06EA7C8ED`。5% 项仅作为固定研究分支保留；不继续尝试中间权重、ARX 特征组合或 Price gate，不读 blind、不生产重训、不更新 `results/best/` 或 `提交这个/`。初次和验证产物分别位于 `results/raw/runs/experiments/a61_recursive_arx_diversity_development_20260804/` 与 `results/raw/runs/experiments/a61_recursive_arx_diversity_verification_20260804/`。
+
+## 2026-08-09 P3 Reference-quality Input + Legal Causal Rolling 真实训练
+
+P3 复用 A61 verification 的 19 个 development 折，实际覆盖 3,648 个逐起点预测和 58,368 个目标×步长评分单元；没有使用 blind、平台分数或未来真实特征。完整运行耗时约 39.34 分钟。
+
+| 路线 | pooled MAPE | `1-MAPE` | 相对 A61 |
+| --- | ---: | ---: | ---: |
+| A61 冻结父模型 | 5.195745% | 94.804255% | — |
+| P1 CausalRolling | 5.543435% | 94.456565% | +0.347690pp |
+| P2 Matured Residual | 6.575605% | 93.424395% | +1.379860pp |
+| P2 Strict Historical Analog | 5.504724% | 94.495276% | +0.308979pp |
+| A64 Direct Delta Ridge | 5.328928% | 94.671072% | +0.133183pp |
+| P3 cross-fitted static | **5.159141%** | **94.840859%** | **-0.036604pp** |
+
+P3 静态融合在 pooled、目标和 recent5 上有效：赢 `16/19` 折、recent5 赢 `4/5`，`generator_1` 与 `generator_all` 分别改善 `0.029906pp` 和 `0.043303pp`。但 `dev_15` 退化 `0.125153pp`，超过预注册 `0.100pp` 最差折上限，因此 `static_gate.passed=false`、状态为 `STOP_STATIC_FUSION`。该结果不触发未来门禁、生产重训或 Champion 覆盖。
