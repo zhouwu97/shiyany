@@ -1,4 +1,4 @@
-"""以固定预测结果生成 Q0/Q1/Q2 提交质量消融包。"""
+"""以固定预测结果生成 Q0/Q1/Q2/Q3 提交质量消融包。"""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from gas_forecast.submission import package_submission, validate_submission_fram
 from gas_forecast.submission_quality import (
     COMPETITION_QUALITY_POLICY,
     policy_with_raw_columns,
+    prepare_full_matrix_submission_input,
     prepare_submission_input,
     raw_columns,
 )
@@ -67,6 +68,10 @@ def main() -> None:
         source_input,
         COMPETITION_QUALITY_POLICY,
     )
+    q3_input, q3_report = prepare_full_matrix_submission_input(
+        source_input,
+        COMPETITION_QUALITY_POLICY,
+    )
     payload = {
         "q0": _write_candidate(
             "Q0_current",
@@ -88,6 +93,13 @@ def main() -> None:
             result,
             args.output_dir,
             report=q2_report,
+        ),
+        "q3": _write_candidate(
+            "Q3_full_matrix_quality",
+            q3_input,
+            result,
+            args.output_dir,
+            report=q3_report,
         ),
     }
     report_path = args.output_dir / "quality_ablation.json"

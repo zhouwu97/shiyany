@@ -15,7 +15,9 @@ from gas_forecast.data import align_tables
 from gas_forecast.experiments import finalize_run, new_run_dir, write_json
 from gas_forecast.features import load_price_schedule
 from gas_forecast.rich_residual import (
+    DEFAULT_BLEND_WEIGHTS,
     RICH_FEATURE_GROUPS,
+    RICH_FEATURE_PROFILES,
     RichResidualSpec,
     build_rich_residual_oof,
 )
@@ -52,6 +54,49 @@ def _parse_group_set(value: str) -> frozenset[str]:
 
 def _name_for_groups(groups: frozenset[str]) -> str:
     return "rich_base" if not groups else "rich_" + "_".join(sorted(groups))
+
+
+def _parse_float_tuple(value: str, *, description: str) -> tuple[float, ...]:
+    """解析逗号分隔的固定数值配置，拒绝空项和隐式默认值。"""
+
+    try:
+        values = tuple(float(item.strip()) for item in value.split(",") if item.strip())
+    except ValueError as exc:
+        raise ValueError(f"{description} 必须是逗号分隔的小数") from exc
+    if not values:
+        raise ValueError(f"{description} 不能为空")
+    return values
+
+
+def _parse_active_horizons(value: str | None) -> tuple[int, ...] | None:
+    """解析分钟粒度的 A51 步长白名单；None 保持既有全步长行为。"""
+
+    if value is None:
+        return None
+    try:
+        values = tuple(int(item.strip()) for item in value.split(",") if item.strip())
+    except ValueError as exc:
+        raise ValueError("--active-horizons 必须是逗号分隔的整数分钟") from exc
+    if not values:
+        raise ValueError("--active-horizons 不能为空")
+    return values
+
+
+def _spec_payload(spec: RichResidualSpec) -> dict[str, object]:
+    """将不可变 spec 规范化为可审计的 JSON 记录。"""
+
+    return {
+        "name": spec.name,
+        "target": spec.target,
+        "feature_groups": sorted(spec.feature_groups),
+        "feature_profile": spec.feature_profile,
+        "active_horizons": list(spec.active_horizons) if spec.active_horizons else None,
+        "include_champion_prediction": spec.include_champion_prediction,
+        "exclude_long_feature_groups": sorted(spec.exclude_long_feature_groups),
+        "min_train_rows": spec.min_train_rows,
+        "n_estimators": spec.n_estimators,
+        "blend_weights": list(spec.blend_weights),
+    }
 
 
 def _selection_payload(reports: dict[str, dict[str, object]]) -> dict[str, object]:
@@ -136,6 +181,34 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="确认本次只对单一已冻结组执行一次 final/blind 报告，不用于选参",
     )
+    parser.add_argument(
+        "--candidate-name",
+        help="覆盖自动候选名；仅允许单一 --group-set，便于冻结 A51 名称",
+    )
+    parser.add_argument(
+        "--feature-profile",
+        choices=tuple(sorted(RICH_FEATURE_PROFILES)),
+        default="all",
+        help="all 保持既有特征全集；long_horizon 使用 A51 显式因果白名单",
+    )
+    parser.add_argument(
+        "--active-horizons",
+        help="仅训练/修正的分钟步长，例如 75,90,105,120；默认全部步长",
+    )
+    parser.add_argument(
+        "--blend-weights",
+        default=",".join(f"{weight:.2f}" for weight in DEFAULT_BLEND_WEIGHTS),
+        help="固定评估的 blend 权重，例如 0.30；不进行连续权重搜索",
+    )
+    parser.add_argument(
+        "--include-champion-prediction",
+        action="store_true",
+        help="把同折/同步长 Champion 预测作为生产可得的残差特征",
+    )
+    parser.add_argument(
+        "--comparison-column",
+        help="只复制到输出 OOF 的既有候选列，用于后续固定拼接；不参与本次训练",
+    )
     parser.add_argument("--min-train-rows", type=int, default=256)
     parser.add_argument("--n-estimators", type=int)
     parser.add_argument("--run-dir", type=Path)
@@ -152,28 +225,39 @@ def main() -> None:
     if not groups:
         groups = [frozenset()]
     group_sets = list(dict.fromkeys(groups))
+    if args.candidate_name and len(group_sets) != 1:
+        raise ValueError("--candidate-name 仅允许一个特征组组合")
     if args.scope == "final" and (not args.frozen_final or len(group_sets) != 1):
         raise ValueError("final/blind 只能显式确认且只运行一个已冻结的 Rich 特征组")
+    active_horizons = _parse_active_horizons(args.active_horizons)
+    blend_weights = _parse_float_tuple(args.blend_weights, description="--blend-weights")
     config = _load_config(args.config)
     dataset = align_tables(args.data_dir, config.feature.frequency)
     price_paths = sorted(args.data_dir.glob("*price*.xlsx"))
     price_schedule = load_price_schedule(price_paths[0]) if price_paths else None
     champion = _read_frame(args.baseline_oof)
+    if args.comparison_column and args.comparison_column not in champion:
+        raise ValueError(f"--comparison-column 不在输入 OOF 中: {args.comparison_column}")
     run_dir = args.run_dir or new_run_dir("results", "experiment_rich_residual")
     run_dir.mkdir(parents=True, exist_ok=True)
 
     merged: pd.DataFrame | None = None
     reports: dict[str, dict[str, object]] = {}
     effective_configs: dict[str, dict[str, object]] = {}
+    candidate_specs: dict[str, dict[str, object]] = {}
     group_dir = run_dir / "groups"
     group_dir.mkdir(parents=True, exist_ok=True)
     for group_set in group_sets:
-        name = _name_for_groups(group_set)
+        name = args.candidate_name or _name_for_groups(group_set)
         spec = RichResidualSpec(
             name=name,
             feature_groups=group_set,
+            feature_profile=args.feature_profile,
+            active_horizons=active_horizons,
+            include_champion_prediction=args.include_champion_prediction,
             min_train_rows=args.min_train_rows,
             n_estimators=args.n_estimators,
+            blend_weights=blend_weights,
         )
         result = build_rich_residual_oof(
             dataset.frame,
@@ -195,10 +279,11 @@ def main() -> None:
                     "current_value",
                     "persistence_pred",
                     args.baseline_column,
+                    args.comparison_column,
                 )
-                if column in result.rows
+                if column and column in result.rows
             ]
-            merged = result.rows.loc[:, base_columns + candidate_columns].copy()
+            merged = result.rows.loc[:, list(dict.fromkeys(base_columns + candidate_columns))].copy()
         else:
             addition = result.rows.loc[:, OOF_KEYS + candidate_columns]
             merged = merged.merge(addition, on=OOF_KEYS, how="inner", validate="one_to_one")
@@ -206,13 +291,14 @@ def main() -> None:
                 raise ValueError("RichResidual 候选 OOF 键不完整，拒绝合并")
         reports["base" if not group_set else "+".join(sorted(group_set))] = result.report
         effective_configs[name] = asdict(result.feature_config)
+        candidate_specs[name] = _spec_payload(spec)
         # 长开发验证按组落盘，进程意外结束时仍保留已完成的严格 OOF 收据。
         result.rows.to_csv(group_dir / f"{name}_oof.csv", index=False, encoding="utf-8")
         write_json(
             group_dir / f"{name}_report.json",
             {
                 "name": name,
-                "feature_groups": sorted(group_set),
+                "spec": _spec_payload(spec),
                 "report": result.report,
                 "effective_config": asdict(result.feature_config),
             },
@@ -229,6 +315,8 @@ def main() -> None:
         "baseline_column": args.baseline_column,
         "candidates": reports,
         "effective_configs": effective_configs,
+        "candidate_specs": candidate_specs,
+        "comparison_column": args.comparison_column,
         "strict_oof": True,
         "blind_used_for_selection": False,
     }
@@ -255,6 +343,8 @@ def main() -> None:
             "formal_candidate": False,
             "pooled_mape": min(best_metrics) if best_metrics else None,
             "baseline": args.baseline_column,
+            "comparison_column": args.comparison_column,
+            "candidate_specs": candidate_specs,
             "config": asdict(config),
             "report": "report.json",
             "oof": "oof.csv",

@@ -20,9 +20,9 @@ Strict C0 冻结基线为 pooled MAPE `5.297932%`（含最终 blind 的全 OOF �
 - development（不含 blind）经生产容量投影后 MAPE `5.229437%`，相对同口径 C0 改善 `0.030575pp`；
 - 19 个 development folds 中赢 14 个，最近 5 折赢 4 个；
 - 冻结后唯一一次 blind 确认改善 `0.040860pp`；
-- Production Gate 的 250 个未来扰动、历史 92 项 pytest、192×16 提交校验和确定性 ZIP 全部通过；提交质量修复后当前测试套件为 95 项。
+- Production Gate 的 250 个未来扰动、历史 92 项 pytest、192×16 提交校验和确定性 ZIP 全部通过；后续研究分支回归后当前完整测试套件为 128 项。
 
-正式初赛提交为 `提交这个/咕咕嘎嘎_gas_predict_prelim.zip`，ZIP 根目录只包含 `input.csv` 与 `s_result.csv`。第二梯队 CatBoost/Recursive ARX 已实现固定规格，但因主线已得到强晋级结果而未启动大规模 OOF 训练；复赛、决赛和优化调度仍不实现。
+正式初赛提交为 `提交这个/咕咕嘎嘎_gas_predict_prelim.zip`，ZIP 根目录只包含 `input.csv` 与 `s_result.csv`。第二梯队的固定 CatBoost 与 Recursive ARX 已在独立、无 blind 的 development OOF 上复验；A61 仅保留预注册的 5% Recursive ARX 融合，尚未生产重训、查看 blind 或替换正式提交。复赛、决赛和优化调度仍不实现。
 
 ## 环境
 
@@ -74,7 +74,7 @@ python scripts/audit_data.py --data-dir "data/raw/official/初赛-参赛者使�
 
 `scripts/prepare_submission.py` 和 `scripts/package_submission.py` 默认启用该质量策略；`scripts/production_gate.py` 会将额外 raw 字段、常数 raw 字段和登记字段的未修复 IQR 越界视为失败。
 
-需要保留 Q0/Q1/Q2 上传消融包时，可执行：
+需要保留 Q0/Q1/Q2/Q3 上传消融包时，可执行：
 
 ```powershell
 python scripts/run_quality_ablation.py `
@@ -83,10 +83,13 @@ python scripts/run_quality_ablation.py `
   --output-dir results/quality/<run-name>
 
 python scripts/compare_submission_quality.py `
-  --candidate results/quality/<run-name>/Q2_schema_and_repair/submission.zip `
+  --candidate results/quality/<run-name>/Q3_full_matrix_quality/submission.zip `
   --reference <满质量参考包.zip>
 ```
 
+Q3 在 Q2 的 21 列 raw schema 基础上，对整个提交矩阵删除常数/重复派生列，
+迭代修复 IQR 异常，并删除仍无法通过多分位数与 Z-score 门禁的派生列。
+Q3 只用于固定 `s_result.csv` 的平台质量 A/B，不会自动覆盖正式提交。
 参考包仅作为 schema 与回归 oracle；质量策略不会读取、复制或按日期替换参考包中的 192 行值。
 
 ## 已验收 RichResidual 候选
@@ -111,7 +114,65 @@ python scripts/production_gate.py `
 
 脚本会校验 final 收据、基线 OOF、特征配置和固定 30% 融合权重；未传入 `--allow-confirmed-blind-oof` 时，blind 标签默认不能用于重训。
 
+### A50–A52 后续研究状态
+
+- A50 Ramp Error Atlas 已确认 RichGas 在 `generator_1` 的 mild/medium/large ramp 上改善，而 stable 段退化；ramp 档由真实未来增量定义，因此只用于 OOF 诊断，不能直接作为线上门控输入。
+- A52 的六组预注册短长权重全部不及固定 `rich_gas_blend_30`，已停止权重微调。
+- A51 的 `rich_g1_long` 仅训练 `t+75/90/105/120` 四个残差模型，使用 249 个固定因果特征（含同步长 Champion 预测），短步长保持 RichGas。development 拼接候选为 `5.211443%`，比 RichGas 改善 `0.006326pp`，属于保留研究候选，未进行 blind 验收或生产重训。
+- A53 已将真实未来 ramp 写成显式 `oracle_only` 诊断：相对 RichGas 只能改善 `0.004447pp`，低于启动 A55 的 `0.005pp` 门槛；其输出不可部署。A54 的严格前向分位数图谱确认 `|A51-RichGas|` 存在条件信号，但不改变这一停止规则，因此不会启动 Logistic gate、blind 或生产重训。
+
+可复现 A51 的严格 development 命令如下；`--comparison-column` 只复制已冻结 RichGas OOF 供固定短长拼接，不参与训练：
+
+```powershell
+python scripts/run_rich_residual.py `
+  --data-dir "data/raw/official/初赛-参赛者使用" `
+  --baseline-oof "results/raw/runs/experiments/rich_residual_development_b_20260803/oof.csv" `
+  --baseline-column aggressive_r75_lgb20_pred `
+  --config "results/raw/runs/experiments/rich_residual_development_b_20260803/config.json" `
+  --scope development --group-set quantile,ramp,gas `
+  --candidate-name rich_g1_long --feature-profile long_horizon `
+  --active-horizons 75,90,105,120 --blend-weights 0.30 `
+  --include-champion-prediction --comparison-column rich_gas_blend_30_pred
+```
+
+可复现 A53/A54 的 development-only 诊断如下。A53 使用真实标签定义 ramp，仅用于测理论上限；A54 的每个分位数边界只取该折 `train_end` 以前的因果特征或已完成 OOF 预测：
+
+```powershell
+python scripts/run_oracle_ramp_router.py `
+  --input "results/raw/runs/experiments/a51_g1_long_rich_residual_development_20260803/oof.csv" `
+  --baseline-column rich_gas_blend_30_pred `
+  --specialist-column rich_g1_long_blend_30_pred `
+  --run-dir "results/raw/runs/experiments/a53_oracle_ramp_router_development_20260803"
+
+python scripts/run_causal_ramp_atlas.py `
+  --data-dir "data/raw/official/初赛-参赛者使用" `
+  --input "results/raw/runs/experiments/a51_g1_long_rich_residual_development_20260803/oof.csv" `
+  --config "results/raw/runs/experiments/a51_g1_long_rich_residual_development_20260803/config.json" `
+  --champion-column aggressive_r75_lgb20_pred `
+  --rich-gas-column rich_gas_blend_30_pred `
+  --specialist-column rich_g1_long_blend_30_pred `
+  --run-dir "results/raw/runs/experiments/a54_causal_disagreement_ramp_atlas_development_20260803"
+```
+
 ## 训练、预测与提交
+
+### 未来行重建训练候选
+
+当平台一次性提供完整评分期输入时，可训练同刻发电量重建模型，并按
+`origin + horizon` 读取目标时刻输入行。该候选对评分输入范围外的尾部单元
+回退到已有基础模型，独立输出且不覆盖 `results/best`：
+
+```powershell
+python scripts/train_future_reconstruction.py `
+  --train-dir "data/raw/official/初赛-参赛者使用" `
+  --test-dir "data/raw/scoring/初赛-评分所用测试集" `
+  --base-model "results/raw/runs/training/aggressive_r75_lgb20_20260802/model.joblib" `
+  --run-dir "results/raw/runs/training/future_row_reconstruction_20260809" `
+  --reference "E:/qq/submission.zip"
+```
+
+`--reference` 只在模型和预测写盘后计算保留评估，不进入 `fit`。模型报告会记录
+前向验证、重建单元比例、基础模型回退比例、参考 MAPE 和文件 SHA-256。
 
 正式自动编排入口默认按 pooled OOF 直接比较单模型、目标路由与稳定目标×步长路由。每次运行创建独立目录，逐折 checkpoint 可恢复：
 
@@ -234,4 +295,4 @@ python scripts/run_aggressive_plan.py diversity --input <candidate-oof> `
   --challengers lgb_residual_pred ridge_pred x1_indirect_g1_pred
 ```
 
-缓存统一写入 `results/research_v2/`，实验登记写入 `results/aggressive_registry.csv`。完整输入契约、停止规则和各阶段产物见[冲分执行说明](docs/AGGRESSIVE_PLAN.md)。Absolute CatBoost-MAPE 与 Recursive ARX 已实现为第二梯队代码，但只有 stacking、Price、Physical/X1 全部完成后才允许启用；不执行 Optuna 或大范围参数搜索。
+缓存统一写入 `results/research_v2/`，实验登记写入 `results/aggressive_registry.csv`。完整输入契约、停止规则和各阶段产物见[冲分执行说明](docs/AGGRESSIVE_PLAN.md)。Absolute CatBoost-MAPE 与 Recursive ARX 只允许在 stacking、Price、Physical/X1 完成后的独立预注册 OOF 中启用；A61 已完成一次固定 5/10/20% Recursive ARX 比较，不执行 Optuna、大范围参数搜索或连续权重微调。

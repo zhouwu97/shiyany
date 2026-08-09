@@ -65,4 +65,4 @@ Correction 权重非负，直接以 SLSQP 最小化 competition MAPE。候选固
 
 Phase 0-5 已完成，统一结果登记于 `results/aggressive_registry.csv`。最终冻结的初赛模型为 `aggressive_r75_lgb20`，development 经容量投影后为 `5.229437%`，唯一一次 blind 确认为正向，Production Gate 全部通过。正式 ZIP 根目录为 `input.csv` 和 `s_result.csv`。
 
-第二梯队 Absolute CatBoost-MAPE 与 Recursive ARX 的固定实现和测试已保留，但主线已达到强晋级标准，按资源停止规则不启动大规模 OOF。本文档不扩展到复赛、决赛或优化调度。
+第二梯队 Absolute CatBoost-MAPE 与 Recursive ARX 的固定实现和测试已保留。2026-08-04 在 A51/A60 严格 development 路线完成后，A61 以新的独立预注册执行了 Recursive ARX 的固定 `5/10/20%` 融合；只有 5% 满足 pooled 与 recent5 门槛，仍不读取 blind 或覆盖正式模型。本文档不扩展到复赛、决赛或优化调度。

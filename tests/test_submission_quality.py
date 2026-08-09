@@ -17,6 +17,7 @@ from gas_forecast.submission_quality import (
     COMPETITION_QUALITY_POLICY,
     audit_submission_quality,
     enforce_submission_quality,
+    prepare_full_matrix_submission_input,
     prepare_submission_input,
 )
 
@@ -103,3 +104,35 @@ def test_quality_policy_is_enforced_by_submission_archive(tmp_path: Path) -> Non
         quality_policy=policy,
     )
     assert archive["valid"] is True
+
+
+def test_full_matrix_quality_removes_constant_and_duplicate_features() -> None:
+    source = _input_frame().drop(columns="air_heater_5")
+    source["feat_constant"] = 1.0
+    source["feat_duplicate"] = source["feat_generator_1_lag_1"]
+
+    prepared, report = prepare_full_matrix_submission_input(source, _policy())
+
+    assert list(prepared.columns) == [
+        "datetime",
+        "generator_1",
+        "feat_generator_1_lag_1",
+    ]
+    assert report["dropped_constant_columns"] == ["feat_constant"]
+    assert report["dropped_duplicate_columns"] == [
+        {
+            "column": "feat_duplicate",
+            "duplicate_of": "feat_generator_1_lag_1",
+        }
+    ]
+
+
+def test_full_matrix_quality_winsorizes_derived_features() -> None:
+    source = _input_frame().drop(columns="air_heater_5")
+    source["feat_outlier"] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 1000.0]
+
+    prepared, report = prepare_full_matrix_submission_input(source, _policy())
+
+    assert prepared["feat_outlier"].iloc[-1] < 1000.0
+    assert report["winsorized_cells"] >= 1
+    assert report["final_quality"]["iqr_outlier_cells_all_methods"] == 0

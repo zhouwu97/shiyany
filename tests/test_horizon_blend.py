@@ -5,6 +5,7 @@ import pandas as pd
 
 from gas_forecast.horizon_blend import (
     build_two_band_blend_grid,
+    build_two_band_blend_pairs,
     time_ordered_four_band_router,
 )
 
@@ -86,3 +87,25 @@ def test_four_band_router_does_not_use_current_fold_labels_for_route_choice() ->
     altered = perturbed.rows.loc[perturbed.rows["fold"].eq("dev_03"), candidate]
     np.testing.assert_allclose(original, altered)
     assert all(item["fold"] != "dev_01" or item["fallback"] for item in baseline.route_trace)
+
+
+def test_two_band_pairs_only_emit_pre_registered_combinations() -> None:
+    rows = _rows()
+
+    result = build_two_band_blend_pairs(
+        rows,
+        baseline_column="champion_pred",
+        branch_column="rich_branch_pred",
+        comparison_column="champion_pred",
+        weight_pairs=((0.20, 0.30), (0.30, 0.50)),
+        scope="development",
+    )
+
+    assert set(result.report["models"]) == {
+        "rich_short20_long30_pred",
+        "rich_short30_long50_pred",
+    }
+    assert result.report["weight_pairs"] == [
+        {"short_weight": 0.20, "long_weight": 0.30},
+        {"short_weight": 0.30, "long_weight": 0.50},
+    ]

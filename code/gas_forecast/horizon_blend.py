@@ -98,6 +98,75 @@ def _weight_label(weight: float) -> str:
     return f"{int(round(weight * 100)):02d}"
 
 
+def _validate_weight_pairs(weight_pairs: tuple[tuple[float, float], ...]) -> None:
+    """验证预注册的短长权重对，禁止重复或隐式笛卡尔扩张。"""
+
+    if not weight_pairs:
+        raise ValueError("horizon blend 权重对不能为空")
+    if len(set(weight_pairs)) != len(weight_pairs):
+        raise ValueError("horizon blend 权重对不能重复")
+    for short_weight, long_weight in weight_pairs:
+        _validate_weights((short_weight, long_weight))
+
+
+def build_two_band_blend_pairs(
+    rows: pd.DataFrame,
+    *,
+    baseline_column: str,
+    branch_column: str,
+    comparison_column: str,
+    weight_pairs: tuple[tuple[float, float], ...],
+    scope: str,
+) -> HorizonBlendResult:
+    """比较显式列出的短长权重对；不生成未登记的笛卡尔组合。"""
+
+    if scope not in {"screening", "development", "final"}:
+        raise ValueError("horizon blend scope 无效")
+    _validate_weight_pairs(weight_pairs)
+    work = _validate_rows(
+        rows,
+        baseline_column=baseline_column,
+        branch_column=branch_column,
+        comparison_column=comparison_column,
+    )
+    candidates: list[str] = []
+    for short_weight, long_weight in weight_pairs:
+        raw_column = (
+            f"rich_short{_weight_label(short_weight)}_long{_weight_label(long_weight)}_raw_pred"
+        )
+        output_column = (
+            f"rich_short{_weight_label(short_weight)}_long{_weight_label(long_weight)}_pred"
+        )
+        work[raw_column] = _candidate_values(
+            work,
+            baseline_column=baseline_column,
+            branch_column=branch_column,
+            short_weight=short_weight,
+            long_weight=long_weight,
+        )
+        work = project_long_candidate(work, raw_column, output_column=output_column)
+        candidates.append(output_column)
+    reports = {
+        column: compare_research_candidate(work, column, comparison_column, scope=scope)
+        for column in candidates
+    }
+    return HorizonBlendResult(
+        rows=work,
+        report={
+            "scope": scope,
+            "baseline_column": baseline_column,
+            "branch_column": branch_column,
+            "comparison_column": comparison_column,
+            "weight_pairs": [
+                {"short_weight": short_weight, "long_weight": long_weight}
+                for short_weight, long_weight in weight_pairs
+            ],
+            "models": reports,
+            "strict_oof_contract": "只比较预注册权重对，不读取 blind，也不按单步长自由搜索",
+        },
+    )
+
+
 def build_two_band_blend_grid(
     rows: pd.DataFrame,
     *,
@@ -110,50 +179,28 @@ def build_two_band_blend_grid(
 ) -> HorizonBlendResult:
     """比较低自由度的短长两段 blend；generator_all 保持现有基线。"""
 
-    if scope not in {"screening", "development", "final"}:
-        raise ValueError("horizon blend scope 无效")
     _validate_weights(short_weights)
     _validate_weights(long_weights)
-    work = _validate_rows(
+    pairs = tuple(
+        (short_weight, long_weight)
+        for short_weight in short_weights
+        for long_weight in long_weights
+    )
+    result = build_two_band_blend_pairs(
         rows,
         baseline_column=baseline_column,
         branch_column=branch_column,
         comparison_column=comparison_column,
+        weight_pairs=pairs,
+        scope=scope,
     )
-    candidates: list[str] = []
-    for short_weight in short_weights:
-        for long_weight in long_weights:
-            raw_column = (
-                f"rich_short{_weight_label(short_weight)}_long{_weight_label(long_weight)}_raw_pred"
-            )
-            output_column = (
-                f"rich_short{_weight_label(short_weight)}_long{_weight_label(long_weight)}_pred"
-            )
-            work[raw_column] = _candidate_values(
-                work,
-                baseline_column=baseline_column,
-                branch_column=branch_column,
-                short_weight=short_weight,
-                long_weight=long_weight,
-            )
-            work = project_long_candidate(work, raw_column, output_column=output_column)
-            candidates.append(output_column)
-    reports = {
-        column: compare_research_candidate(work, column, comparison_column, scope=scope)
-        for column in candidates
-    }
+    report = dict(result.report)
+    report["short_weights"] = list(short_weights)
+    report["long_weights"] = list(long_weights)
+    report["strict_oof_contract"] = "权重网格不读取 blind，也不按单步长自由搜索"
     return HorizonBlendResult(
-        rows=work,
-        report={
-            "scope": scope,
-            "baseline_column": baseline_column,
-            "branch_column": branch_column,
-            "comparison_column": comparison_column,
-            "short_weights": list(short_weights),
-            "long_weights": list(long_weights),
-            "models": reports,
-            "strict_oof_contract": "权重网格不读取 blind，也不按单步长自由搜索",
-        },
+        rows=result.rows,
+        report=report,
     )
 
 

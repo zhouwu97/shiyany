@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -7,9 +9,11 @@ import pytest
 from gas_forecast.config import FeatureConfig, ForecastConfig, ValidationConfig
 from gas_forecast.research import select_research_folds
 from gas_forecast.rich_residual import (
+    LONG_HORIZON_ABLATION_GROUP_ORDER,
     RichResidualSpec,
     build_rich_residual_oof,
     fit_full_rich_residual_corrector,
+    long_horizon_feature_group,
 )
 
 
@@ -151,3 +155,160 @@ def test_full_rich_fit_requires_explicit_blind_oof_authorization() -> None:
     assert default_corrector.states_[15].training_rows == default_rows
     assert confirmed_corrector.states_[15].training_rows == confirmed_rows
     assert confirmed_rows > default_rows
+
+
+def test_long_horizon_profile_only_modifies_registered_generator1_horizons() -> None:
+    frame = _frame()
+    config = replace(_config(), feature=replace(_config().feature, horizons=(1, 5, 6, 7, 8)))
+    champion = _champion_oof(frame, config)
+    spec = RichResidualSpec(
+        name="test_long",
+        feature_groups=frozenset({"quantile", "ramp", "gas"}),
+        feature_profile="long_horizon",
+        active_horizons=(75, 90, 105, 120),
+        include_champion_prediction=True,
+        min_train_rows=16,
+        n_estimators=12,
+        blend_weights=(0.30,),
+    )
+
+    result = build_rich_residual_oof(frame, champion, config=config, spec=spec)
+    raw_column = "test_long_residual_raw_pred"
+    inactive_generator1 = result.rows["target"].eq("generator_1") & ~result.rows[
+        "horizon"
+    ].isin(spec.active_horizons)
+    generator_all = result.rows["target"].eq("generator_all")
+    np.testing.assert_allclose(
+        result.rows.loc[inactive_generator1, raw_column],
+        result.rows.loc[inactive_generator1, "aggressive_r75_lgb20_pred"],
+    )
+    np.testing.assert_allclose(
+        result.rows.loc[generator_all, raw_column],
+        result.rows.loc[generator_all, "aggressive_r75_lgb20_pred"],
+    )
+    assert result.report["feature_profile"] == "long_horizon"
+    assert 1 <= int(result.report["feature_columns"]) <= 250
+    assert "feat_champion_prediction" in result.report["selected_feature_columns"]
+    assert result.report["active_horizons"] == [75, 90, 105, 120]
+    assert result.report["strict_oof_contract"]["blind_labels_used"] is False
+    assert result.report["strict_oof_contract"]["champion_prediction_is_production_available"]
+    for horizons in result.report["trained_horizons"].values():
+        assert set(horizons).issubset(set(spec.active_horizons))
+
+
+def test_long_horizon_profile_can_target_generator_all() -> None:
+    frame = _frame()
+    config = replace(_config(), feature=replace(_config().feature, horizons=(1, 5, 6, 7, 8)))
+    champion = _champion_oof(frame, config)
+    spec = RichResidualSpec(
+        name="test_gall_long",
+        target="generator_all",
+        feature_groups=frozenset({"quantile", "ramp", "gas"}),
+        feature_profile="long_horizon",
+        active_horizons=(75, 90, 105, 120),
+        include_champion_prediction=True,
+        min_train_rows=16,
+        n_estimators=12,
+        blend_weights=(0.30,),
+    )
+
+    result = build_rich_residual_oof(frame, champion, config=config, spec=spec)
+
+    raw_column = "test_gall_long_residual_raw_pred"
+    generator_1 = result.rows["target"].eq("generator_1")
+    inactive_generator_all = result.rows["target"].eq("generator_all") & ~result.rows[
+        "horizon"
+    ].isin(spec.active_horizons)
+    np.testing.assert_allclose(
+        result.rows.loc[generator_1, raw_column],
+        result.rows.loc[generator_1, "aggressive_r75_lgb20_pred"],
+    )
+    np.testing.assert_allclose(
+        result.rows.loc[inactive_generator_all, raw_column],
+        result.rows.loc[inactive_generator_all, "aggressive_r75_lgb20_pred"],
+    )
+    assert result.report["target_scope"] == "generator_all"
+    assert result.report["strict_oof_contract"]["target_scope"] == "generator_all"
+
+
+def test_generator_all_residual_history_excludes_held_fold_labels() -> None:
+    frame = _frame()
+    config = replace(_config(), feature=replace(_config().feature, horizons=(1, 5, 6, 7, 8)))
+    champion = _champion_oof(frame, config)
+    spec = RichResidualSpec(
+        name="test_gall_history",
+        target="generator_all",
+        feature_groups=frozenset({"quantile", "ramp", "gas"}),
+        feature_profile="long_horizon",
+        active_horizons=(75, 90, 105, 120),
+        include_champion_prediction=True,
+        min_train_rows=16,
+        n_estimators=12,
+        blend_weights=(0.30,),
+    )
+
+    baseline = build_rich_residual_oof(frame, champion, config=config, spec=spec)
+    checked_fold = baseline.report["folds"][2]
+    changed = champion.copy()
+    changed.loc[
+        changed["fold"].eq(checked_fold) & changed["target"].eq("generator_all"), "actual"
+    ] += 10_000.0
+    perturbed = build_rich_residual_oof(frame, changed, config=config, spec=spec)
+    column = "test_gall_history_residual_pred"
+    original_values = baseline.rows.loc[
+        baseline.rows["fold"].eq(checked_fold) & baseline.rows["target"].eq("generator_all"),
+        column,
+    ]
+    changed_values = perturbed.rows.loc[
+        perturbed.rows["fold"].eq(checked_fold) & perturbed.rows["target"].eq("generator_all"),
+        column,
+    ]
+    np.testing.assert_allclose(original_values, changed_values)
+
+
+def test_long_horizon_spec_rejects_invalid_minute_step() -> None:
+    with pytest.raises(ValueError, match="15 分钟"):
+        RichResidualSpec(name="test_long", active_horizons=(80,))
+
+
+def test_long_horizon_ablation_excludes_only_registered_group() -> None:
+    frame = _frame()
+    config = replace(_config(), feature=replace(_config().feature, horizons=(1, 5, 6, 7, 8)))
+    champion = _champion_oof(frame, config)
+    spec = RichResidualSpec(
+        name="test_ablation",
+        feature_groups=frozenset({"quantile", "ramp", "gas"}),
+        feature_profile="long_horizon",
+        active_horizons=(75, 90, 105, 120),
+        include_champion_prediction=True,
+        exclude_long_feature_groups=frozenset({"branch_prediction_disagreement"}),
+        min_train_rows=16,
+        n_estimators=12,
+        blend_weights=(0.30,),
+    )
+
+    result = build_rich_residual_oof(frame, champion, config=config, spec=spec)
+
+    assert result.report["excluded_long_feature_groups"] == [
+        "branch_prediction_disagreement"
+    ]
+    assert result.report["champion_prediction_feature"] is False
+    assert "feat_champion_prediction" not in result.report["selected_feature_columns"]
+    counts = result.report["long_horizon_feature_group_counts"]
+    assert set(counts) == set(LONG_HORIZON_ABLATION_GROUP_ORDER)
+    assert counts["branch_prediction_disagreement"] == 0
+    assert long_horizon_feature_group("feat_target_price_tplus_75") == "time_price"
+    assert long_horizon_feature_group("feat_rich_ramp_generator_1_rate") == "quantile_ramp_state"
+
+
+def test_long_horizon_ablation_rejects_unknown_or_wrong_profile_group() -> None:
+    with pytest.raises(ValueError, match="未知 long_horizon"):
+        RichResidualSpec(
+            name="test_unknown_group",
+            exclude_long_feature_groups=frozenset({"unknown"}),
+        )
+    with pytest.raises(ValueError, match="只能用于 long_horizon"):
+        RichResidualSpec(
+            name="test_wrong_profile",
+            exclude_long_feature_groups=frozenset({"generation_dynamics"}),
+        )

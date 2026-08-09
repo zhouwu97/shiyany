@@ -12,6 +12,7 @@ import pandas as pd
 from gas_forecast.experiments import finalize_run, new_run_dir, write_json
 from gas_forecast.horizon_blend import (
     build_two_band_blend_grid,
+    build_two_band_blend_pairs,
     time_ordered_four_band_router,
 )
 
@@ -27,6 +28,23 @@ def _parse_weights(value: str) -> tuple[float, ...]:
     if not weights:
         raise ValueError("权重列表不能为空")
     return weights
+
+
+def _parse_weight_pairs(value: str) -> tuple[tuple[float, float], ...]:
+    """解析 ``short:long`` 形式的预注册权重对。"""
+
+    pairs: list[tuple[float, float]] = []
+    for item in value.split(","):
+        normalized = item.strip()
+        if not normalized:
+            continue
+        parts = [part.strip() for part in normalized.split(":")]
+        if len(parts) != 2 or not all(parts):
+            raise ValueError("--weight-pairs 必须为 short:long,short:long 格式")
+        pairs.append((float(parts[0]), float(parts[1])))
+    if not pairs:
+        raise ValueError("--weight-pairs 不能为空")
+    return tuple(pairs)
 
 
 def _best_grid_candidate(report: dict[str, object]) -> dict[str, object] | None:
@@ -75,6 +93,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scope", choices=("screening", "development"), default="development")
     parser.add_argument("--short-weights", default="0.10,0.15,0.20")
     parser.add_argument("--long-weights", default="0.20,0.25,0.30,0.35")
+    parser.add_argument(
+        "--weight-pairs",
+        help="显式短长权重对，例如 0.20:0.30,0.20:0.40；提供后不使用笛卡尔网格",
+    )
     parser.add_argument("--short-weight", type=float)
     parser.add_argument("--long-weight", type=float)
     parser.add_argument("--min-history-rows", type=int, default=128)
@@ -88,21 +110,35 @@ def main() -> None:
     run_dir = args.run_dir or new_run_dir("results", "experiment_target_horizon_blend")
     run_dir.mkdir(parents=True, exist_ok=True)
     if args.mode == "grid":
-        result = build_two_band_blend_grid(
-            rows,
-            baseline_column=args.baseline_column,
-            branch_column=args.branch_column,
-            comparison_column=args.comparison_column,
-            short_weights=_parse_weights(args.short_weights),
-            long_weights=_parse_weights(args.long_weights),
-            scope=args.scope,
-        )
+        if args.weight_pairs:
+            result = build_two_band_blend_pairs(
+                rows,
+                baseline_column=args.baseline_column,
+                branch_column=args.branch_column,
+                comparison_column=args.comparison_column,
+                weight_pairs=_parse_weight_pairs(args.weight_pairs),
+                scope=args.scope,
+            )
+        else:
+            result = build_two_band_blend_grid(
+                rows,
+                baseline_column=args.baseline_column,
+                branch_column=args.branch_column,
+                comparison_column=args.comparison_column,
+                short_weights=_parse_weights(args.short_weights),
+                long_weights=_parse_weights(args.long_weights),
+                scope=args.scope,
+            )
         report: dict[str, object] = dict(result.report)
         selection = _best_grid_candidate(report)
         report["selection"] = {
             "best_candidate": selection,
             "selection_used_blind": False,
-            "rule": "仅从预注册 3×4 两段权重中选择，并要求相对 P2 不退化。",
+            "rule": (
+                "仅从 --weight-pairs 的预注册权重对中选择，并要求相对 P2 不退化。"
+                if args.weight_pairs
+                else "仅从预注册 3×4 两段权重中选择，并要求相对 P2 不退化。"
+            ),
         }
         write_json(run_dir / "selection.json", report["selection"])
     else:

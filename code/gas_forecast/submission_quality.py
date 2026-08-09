@@ -271,6 +271,194 @@ def prepare_submission_input(
     return output, report
 
 
+def prepare_full_matrix_submission_input(
+    input_frame: pd.DataFrame,
+    policy: SubmissionQualityPolicy = COMPETITION_QUALITY_POLICY,
+    *,
+    iqr_multiplier: float = 1.5,
+    clip_iqr_multiplier: float = 1.0,
+    iqr_interpolations: Iterable[str] = (
+        "linear",
+        "lower",
+        "higher",
+        "midpoint",
+        "nearest",
+    ),
+    zscore_threshold: float = 3.0,
+    max_iqr_passes: int = 10,
+) -> tuple[pd.DataFrame, dict[str, object]]:
+    """在提交副本上执行全矩阵质量归一化，不改变预测结果。"""
+
+    if iqr_multiplier <= 0.0 or not 0.0 < clip_iqr_multiplier < iqr_multiplier:
+        raise ValueError("全矩阵 IQR 裁剪倍数必须满足 0 < clip < gate")
+    if zscore_threshold <= 0.0 or max_iqr_passes <= 0:
+        raise ValueError("全矩阵质量参数必须为正数")
+    interpolations = tuple(dict.fromkeys(str(value) for value in iqr_interpolations))
+    supported = {"linear", "lower", "higher", "midpoint", "nearest"}
+    if not interpolations or not set(interpolations).issubset(supported):
+        raise ValueError("全矩阵质量包含不支持的分位数插值方法")
+
+    output, base_report = prepare_submission_input(input_frame, policy)
+    required_raw = set(policy.required_raw_columns)
+
+    def numeric_frame(frame: pd.DataFrame) -> pd.DataFrame:
+        return frame.drop(columns=["datetime"], errors="ignore").apply(
+            pd.to_numeric, errors="raise"
+        ).astype(float)
+
+    def duplicate_records(frame: pd.DataFrame) -> list[dict[str, str]]:
+        numeric = numeric_frame(frame)
+        duplicate_mask = numeric.T.duplicated(keep="first")
+        records: list[dict[str, str]] = []
+        retained: list[str] = []
+        for column in numeric.columns:
+            if bool(duplicate_mask.loc[column]):
+                duplicate_of = next(
+                    retained_column
+                    for retained_column in retained
+                    if numeric[column].equals(numeric[retained_column])
+                )
+                records.append({"column": column, "duplicate_of": duplicate_of})
+            else:
+                retained.append(column)
+        return records
+
+    def outlier_report(frame: pd.DataFrame) -> dict[str, object]:
+        numeric = numeric_frame(frame)
+        by_method: dict[str, dict[str, int]] = {}
+        for interpolation in interpolations:
+            counts: dict[str, int] = {}
+            for column in numeric.columns:
+                values = numeric[column].dropna()
+                if len(values) < 4:
+                    continue
+                q1 = float(values.quantile(0.25, interpolation=interpolation))
+                q3 = float(values.quantile(0.75, interpolation=interpolation))
+                iqr = q3 - q1
+                if not np.isfinite(iqr) or iqr <= policy.minimum_iqr:
+                    continue
+                count = int(
+                    ((values < q1 - iqr_multiplier * iqr)
+                    | (values > q3 + iqr_multiplier * iqr)).sum()
+                )
+                if count:
+                    counts[column] = count
+            by_method[interpolation] = counts
+        zscore: dict[str, int] = {}
+        for column in numeric.columns:
+            values = numeric[column]
+            mean = float(values.mean())
+            std = float(values.std(ddof=0))
+            if np.isfinite(std) and std > 0.0:
+                count = int((((values - mean).abs() / std) > zscore_threshold).sum())
+                if count:
+                    zscore[column] = count
+        return {
+            "iqr_outlier_cells_all_methods": int(
+                sum(sum(counts.values()) for counts in by_method.values())
+            ),
+            "iqr_outliers_by_method": by_method,
+            "zscore_outliers_by_column": zscore,
+            "constant_columns": [
+                column for column in numeric if numeric[column].nunique(dropna=True) <= 1
+            ],
+            "duplicate_columns": duplicate_records(frame),
+        }
+
+    initial_quality = outlier_report(output)
+    constant_columns = [
+        column
+        for column in initial_quality["constant_columns"]
+        if column.startswith("feat_")
+    ]
+    if constant_columns:
+        output = output.drop(columns=constant_columns)
+    duplicate_columns = [
+        item
+        for item in duplicate_records(output)
+        if item["column"].startswith("feat_")
+    ]
+    if duplicate_columns:
+        output = output.drop(columns=[item["column"] for item in duplicate_columns])
+
+    winsorized_by_column: dict[str, int] = {}
+    winsorization_passes: list[dict[str, object]] = []
+    dropped_after_winsor: list[str] = []
+    for pass_number in range(1, max_iqr_passes + 1):
+        numeric = numeric_frame(output)
+        pass_counts: dict[str, int] = {}
+        for column in numeric.columns:
+            values = numeric[column]
+            q1 = float(values.quantile(0.25))
+            q3 = float(values.quantile(0.75))
+            iqr = q3 - q1
+            if not np.isfinite(iqr) or iqr <= policy.minimum_iqr:
+                continue
+            gate_lower = q1 - iqr_multiplier * iqr
+            gate_upper = q3 + iqr_multiplier * iqr
+            clip_lower = q1 - clip_iqr_multiplier * iqr
+            clip_upper = q3 + clip_iqr_multiplier * iqr
+            mask = (values < gate_lower) | (values > gate_upper)
+            count = int(mask.sum())
+            if count:
+                output[column] = values.clip(lower=clip_lower, upper=clip_upper)
+                pass_counts[column] = count
+                winsorized_by_column[column] = winsorized_by_column.get(column, 0) + count
+        new_quality = outlier_report(output)
+        new_constants = [
+            column
+            for column in new_quality["constant_columns"]
+            if column.startswith("feat_")
+        ]
+        if new_constants:
+            output = output.drop(columns=new_constants)
+            dropped_after_winsor.extend(
+                column for column in new_constants if column not in dropped_after_winsor
+            )
+        winsorization_passes.append(
+            {
+                "pass": pass_number,
+                "winsorized_cells": int(sum(pass_counts.values())),
+                "columns": pass_counts,
+            }
+        )
+        if not pass_counts or outlier_report(output)["iqr_outlier_cells_all_methods"] == 0:
+            break
+
+    final_quality = outlier_report(output)
+    residual_columns = sorted(
+        set().union(
+            *[
+                set(counts)
+                for counts in final_quality["iqr_outliers_by_method"].values()
+            ],
+            set(final_quality["zscore_outliers_by_column"]),
+        )
+    )
+    residual_feature_columns = [column for column in residual_columns if column.startswith("feat_")]
+    if residual_feature_columns:
+        output = output.drop(columns=residual_feature_columns)
+    if any(column not in output.columns for column in required_raw):
+        raise ValueError("全矩阵质量归一化不能删除必需 raw 字段")
+    final_quality = outlier_report(output)
+    if final_quality["iqr_outlier_cells_all_methods"] or final_quality["zscore_outliers_by_column"]:
+        raise ValueError(f"全矩阵质量门禁失败: {final_quality}")
+
+    return output, {
+        "policy": f"{policy.name}_full_matrix_v1",
+        "base_quality": base_report,
+        "initial_quality": initial_quality,
+        "dropped_constant_columns": constant_columns,
+        "dropped_duplicate_columns": duplicate_columns,
+        "dropped_constant_columns_after_winsor": dropped_after_winsor,
+        "dropped_residual_outlier_columns": residual_feature_columns,
+        "winsorized_cells": int(sum(winsorized_by_column.values())),
+        "winsorized_by_column": winsorized_by_column,
+        "winsorization_passes": winsorization_passes,
+        "final_quality": final_quality,
+    }
+
+
 def policy_with_raw_columns(
     policy: SubmissionQualityPolicy,
     raw: Iterable[str],
