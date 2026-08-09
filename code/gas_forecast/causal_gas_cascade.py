@@ -647,7 +647,26 @@ class CausalGasCascadeForecaster:
             validation_index = frame.index[fold["validation_positions"]]
             train_frame = frame.loc[frame.index <= train_end]
             # 外层训练集映射固定于全 schema，但数值只来自 train_frame。
-            local_model = CausalGasCascadeForecaster(self.config).fit(train_frame)
+            try:
+                local_model = CausalGasCascadeForecaster(self.config).fit(train_frame)
+            except ValueError as error:
+                # 早期外折可能因历史缺失使 Stage1 有效标签不足。跳过该折而非
+                # 改写模型参数；后续调用方必须把不足的 screening 折显式 STOP。
+                if "时间样本不足以生成折" not in str(error):
+                    raise
+                trace.append(
+                    {
+                        "fold": fold["name"],
+                        "train_end": str(train_end),
+                        "validation_start": str(fold["validation_start"]),
+                        "validation_end": str(fold["validation_end"]),
+                        "train_rows": int(len(train_frame)),
+                        "validation_rows": int(len(validation_index)),
+                        "status": "SKIPPED_INSUFFICIENT_INNER_HISTORY",
+                        "skip_reason": str(error),
+                    }
+                )
+                continue
             # 批量推理也必须带上 origin 之前的历史；否则 slice 首行的 lag
             # 会被错误地当作缺失，与线上逐 origin 语义不一致。
             prediction_context = frame.loc[frame.index <= validation_index[-1]]
@@ -705,6 +724,7 @@ class CausalGasCascadeForecaster:
                     "stage2_inference_source": "stage1_final_fit_on_outer_train",
                     "train_rows": int(len(train_frame)),
                     "validation_rows": int(len(validation_index)),
+                    "status": "COMPLETED",
                 }
             )
         if not parts:
@@ -714,6 +734,12 @@ class CausalGasCascadeForecaster:
         )
         report = make_cascade_report(rows)
         report["folds"] = [str(fold["name"]) for fold in outer]
+        report["completed_folds"] = sorted(rows["fold"].astype(str).unique().tolist())
+        report["skipped_folds"] = [
+            str(item["fold"])
+            for item in trace
+            if item.get("status") == "SKIPPED_INSUFFICIENT_INNER_HISTORY"
+        ]
         report["nested_cross_fitting"] = True
         report["resource_mapping"] = mapping.to_dict()
         return CascadeOOFResult(rows=rows.reset_index(drop=True), report=report, trace=trace)
@@ -848,19 +874,26 @@ def future_perturbation_audit(
         future_mask = frame.index > origin
         numeric_columns = frame.select_dtypes(include=[np.number]).columns
         perturbations: dict[str, pd.DataFrame] = {}
-        modified = frame.copy()
+        extreme = frame.copy()
         if len(numeric_columns):
-            modified.loc[future_mask, numeric_columns] = (
-                modified.loc[future_mask, numeric_columns].to_numpy(dtype=float) * 17.0
+            extreme.loc[future_mask, numeric_columns] = (
+                extreme.loc[future_mask, numeric_columns].to_numpy(dtype=float) * 17.0
                 + 123.0
             )
-        perturbations["modify"] = modified
-        perturbations["shuffle"] = frame.sample(frac=1.0, random_state=17)
+        perturbations["extreme"] = extreme
+        shuffled = frame.copy()
+        if int(future_mask.sum()) > 1 and len(numeric_columns):
+            # 只打乱 origin 之后的数值而保留时间轴；整行 sample 后再排序会
+            # 还原原始时间和值的配对，不能构成有效的未来数据扰动。
+            future_values = shuffled.loc[future_mask, numeric_columns].to_numpy(dtype=float)
+            order = np.random.default_rng(17).permutation(len(future_values))
+            shuffled.loc[future_mask, numeric_columns] = future_values[order]
+        perturbations["shuffle"] = shuffled
         nulled = frame.copy()
         if len(numeric_columns):
             nulled.loc[future_mask, numeric_columns] = np.nan
         perturbations["null"] = nulled
-        perturbations["delete"] = frame.loc[~future_mask | (frame.index == origin)]
+        perturbations["delete_future"] = frame.loc[~future_mask | (frame.index == origin)]
         for name, candidate_frame in perturbations.items():
             candidate = model.predict_at_origins(candidate_frame, [origin])
             difference = float(
