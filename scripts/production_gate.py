@@ -15,7 +15,7 @@ from gas_forecast.config import ForecastConfig
 from gas_forecast.data import align_tables
 from gas_forecast.experiments import finalize_run, promote_if_best, sha256, write_json
 from gas_forecast.features import build_causal_features, load_price_schedule
-from gas_forecast.leakage import audit_future_perturbations
+from gas_forecast.leakage import audit_origin_predictor
 from gas_forecast.scoring import score_oof_long
 from gas_forecast.submission import (
     validate_submission_archive,
@@ -67,6 +67,30 @@ def _zip_receipt(path: Path, input_path: Path, result_path: Path) -> dict[str, o
         )
     except (OSError, ValueError, AssertionError) as exc:
         return {"valid": False, "error": str(exc)}
+
+
+def _required_false(name: str, *sources: dict[str, object]) -> bool:
+    """只接受显式、无冲突的 false，避免缺失元数据被默认为安全。"""
+
+    found = False
+    for source in sources:
+        if name in source:
+            found = True
+            if source[name] is not False:
+                return False
+    return found
+
+
+def _expand_policy_sources(*sources: dict[str, object]) -> tuple[dict[str, object], ...]:
+    """同时读取旧版顶层和新版 causal_prediction_audit 声明。"""
+
+    expanded: list[dict[str, object]] = []
+    for source in sources:
+        expanded.append(source)
+        nested = source.get("causal_prediction_audit")
+        if isinstance(nested, dict):
+            expanded.append(nested)
+    return tuple(expanded)
 
 
 def main() -> None:
@@ -124,19 +148,29 @@ def main() -> None:
     price = load_price_schedule(prices[0]) if prices else None
     feature_config = resolve_prediction_feature_config(model)
 
-    def builder(frame: pd.DataFrame) -> pd.DataFrame:
-        return build_causal_features(frame, feature_config, price)
+    def predictor(frame: pd.DataFrame, origin: pd.Timestamp) -> pd.DataFrame:
+        features = build_causal_features(frame, feature_config, price)
+        current = frame.loc[[origin], list(config.targets)]
+        return model.predict(features.loc[[origin]], current)
 
-    def predictor(features: pd.DataFrame, current: pd.DataFrame) -> pd.DataFrame:
-        return model.predict(features, current.loc[:, list(config.targets)])
-
-    leakage = audit_future_perturbations(
+    causal_prediction_audit = audit_origin_predictor(
         dataset.frame,
-        builder,
         predictor=predictor,
         origins=args.origins,
-        n_jobs=args.jobs,
     )
+    policy_sources = _expand_policy_sources(report, manifest)
+    oracle_candidate_safe = _required_false("oracle_candidate", *policy_sources)
+    blind_labels_unused = _required_false("blind_labels_used", *policy_sources)
+    audit_passed = causal_prediction_audit.get("passed") is True
+    audit_cases_checked = int(causal_prediction_audit.get("cases_checked", 0))
+    policy_passed = bool(oracle_candidate_safe and blind_labels_unused)
+    leakage = {
+        "passed": bool(audit_passed and audit_cases_checked >= 250 and policy_passed),
+        "causal_prediction_audit": causal_prediction_audit,
+        "oracle_candidate": not oracle_candidate_safe,
+        "blind_labels_used": not blind_labels_unused,
+        "policy_declarations_valid": policy_passed,
+    }
     write_json(run_dir / "oof_report.json", oof_receipt)
     write_json(run_dir / "leakage.json", leakage)
 
@@ -175,7 +209,7 @@ def main() -> None:
     }
     passed = bool(
         oof_receipt["passed"]
-        and leakage.get("passed") is True
+        and leakage["passed"] is True
         and pytest_receipt["passed"] is True
         and submission_receipt["valid"] is True
         and zip_receipt["valid"] is True
@@ -186,6 +220,9 @@ def main() -> None:
             "candidate": candidate,
             "pooled_mape": float(oof_receipt["pooled_mape"]),
             "leakage_passed": bool(leakage.get("passed") is True),
+            "causal_prediction_audit": causal_prediction_audit,
+            "oracle_candidate": not oracle_candidate_safe,
+            "blind_labels_used": not blind_labels_unused,
             "tests_passed": bool(pytest_receipt["passed"] is True),
             "submission_valid": bool(submission_receipt["valid"] and zip_receipt["valid"]),
             "promotion_evidence": evidence,
