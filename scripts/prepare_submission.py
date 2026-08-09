@@ -47,6 +47,28 @@ def _find_source_file(source: Path, names: tuple[str, ...]) -> Path:
     raise FileNotFoundError(f"运行目录缺少文件: {names}")
 
 
+def _reject_oracle_candidate(manifest: dict[str, object], *, context: str) -> None:
+    """正式提交入口拒绝所有明确标记为 Oracle 的产物。"""
+
+    candidate = str(manifest.get("candidate", ""))
+    oracle = manifest.get("oracle_candidate") is True
+    oracle_only = manifest.get("oracle_only") is True
+    diagnostic_only = manifest.get("diagnostic_only") is True
+    non_causal = manifest.get("causal") is False
+    research_only = manifest.get("research_only") is True
+    if (
+        candidate == "future_row_reconstruction"
+        or oracle
+        or oracle_only
+        or diagnostic_only
+        or (non_causal and research_only)
+    ):
+        raise SystemExit(
+            f"{context} 是 ORACLE/DIAGNOSTIC ONLY（oracle_candidate=true, causal=false），"
+            "禁止进入 results/best 或正式提交目录"
+        )
+
+
 def bootstrap_best(
     source_run: Path,
     best_dir: Path,
@@ -64,6 +86,7 @@ def bootstrap_best(
     if not source_manifest_path.exists():
         raise SystemExit(f"正式运行缺少 manifest.json: {source_run}")
     source_manifest = json.loads(source_manifest_path.read_text(encoding="utf-8"))
+    _reject_oracle_candidate(source_manifest, context="source run")
     if not is_eligible_for_best(source_manifest):
         raise SystemExit("source run 未通过完整 OOF、泄漏、测试和提交机械门槛")
     if not promotion_evidence_passes(source_run, source_manifest):
@@ -178,6 +201,7 @@ def main() -> None:
     if not manifest_path.exists():
         raise SystemExit("没有 results/best/manifest.json，请先提供通过机械收据的正式运行")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    _reject_oracle_candidate(manifest, context="当前 best")
     if not is_eligible_for_best(manifest):
         raise SystemExit("当前 best 未通过完整运行、泄漏、测试和提交资格检查")
     if not promotion_evidence_passes(args.best_dir, manifest):

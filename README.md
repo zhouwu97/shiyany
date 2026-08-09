@@ -156,23 +156,32 @@ python scripts/run_causal_ramp_atlas.py `
 
 ## 训练、预测与提交
 
-### 未来行重建训练候选
+### 未来行重建 Oracle（仅诊断研究）
 
-当平台一次性提供完整评分期输入时，可训练同刻发电量重建模型，并按
-`origin + horizon` 读取目标时刻输入行。该候选对评分输入范围外的尾部单元
-回退到已有基础模型，独立输出且不覆盖 `results/best`：
+`FutureRowReconstructionForecaster` 会按 `origin + horizon` 读取评分期未来行。
+因此它对未来生产观测敏感，硬标识为 `oracle_candidate=true`、`causal=false`、
+`formal_candidate=false`、`deployable=false`，绝不是合法的因果模型。它不能参与
+训练特征、标签、模型选择、融合权重、阈值、`auto_pipeline`、Production Gate
+或正式提交。自动管线的版本白名单也不会枚举它。
+
+如需开展仅用于诊断的复现，必须显式提供研究开关，并把运行目录放在全新的
+`results/oracle/<name>/` 下：
 
 ```powershell
 python scripts/train_future_reconstruction.py `
   --train-dir "data/raw/official/初赛-参赛者使用" `
   --test-dir "data/raw/scoring/初赛-评分所用测试集" `
   --base-model "results/raw/runs/training/aggressive_r75_lgb20_20260802/model.joblib" `
-  --run-dir "results/raw/runs/training/future_row_reconstruction_20260809" `
+  --run-dir "results/oracle/future_row_reconstruction_20260809" `
+  --allow-oracle-research `
   --reference "E:/qq/submission.zip"
 ```
 
-`--reference` 只在模型和预测写盘后计算保留评估，不进入 `fit`。模型报告会记录
-前向验证、重建单元比例、基础模型回退比例、参考 MAPE 和文件 SHA-256。
+脚本只写 `model.joblib`、`base_model.joblib`、`oracle_input.csv`、
+`oracle_predictions.csv`、`report.json` 和带硬拒绝标识的 `manifest.json`。
+它不会生成 `submission.zip`，不会写 `results/best`、`results/raw`、
+`提交这个*` 或任何正式 submission 目录。`--reference` 仅在模型与预测写盘后
+用于独立诊断评分，不进入 `fit`、选择或任何生产决策。
 
 正式自动编排入口默认按 pooled OOF 直接比较单模型、目标路由与稳定目标×步长路由。每次运行创建独立目录，逐折 checkpoint 可恢复：
 

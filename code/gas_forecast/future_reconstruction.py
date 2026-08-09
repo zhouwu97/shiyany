@@ -1,4 +1,8 @@
-"""利用评分期目标时刻输入行训练并执行发电量重建。"""
+"""评分期未来行重建 Oracle。
+
+此模块故意保留一个可用于诊断的“未来行”重建器。它读取评分期未来行，
+因此不是因果模型，不能用于正式训练、选型、生产门禁或提交。
+"""
 
 from __future__ import annotations
 
@@ -43,13 +47,24 @@ class ReconstructionState:
 
 
 class FutureRowReconstructionForecaster:
-    """把目标时刻评分输入映射为多步预测，并对越界时刻回退基础模型。
+    """把目标时刻评分输入映射为多步预测的非因果诊断 Oracle。
 
-    该模型显式使用完整评分输入中的目标时刻行，不属于因果滚动模型。它仍然
-    通过历史训练标签拟合并保存 sklearn 管线；外部参考答案不进入 ``fit``。
+    该模型显式使用完整评分输入中的目标时刻行，绝不能被当作因果滚动模型。
+    它仍然通过历史训练标签拟合并保存 sklearn 管线；外部参考答案不进入
+    ``fit``。类级硬标识供通用生产代码和人工审计拒绝该候选。
     """
 
     version = "future_row_reconstruction"
+    # 这些字段是持久化产物契约的一部分，不得改成“正式候选”语义。
+    oracle_candidate = True
+    oracle_only = True
+    diagnostic_only = True
+    causal = False
+    formal_candidate = False
+    production_candidate = False
+    deployable = False
+    research_only = True
+    oracle_reason = "读取评分期未来行，违反 origin 时点因果边界"
 
     def __init__(
         self,
@@ -116,6 +131,20 @@ class FutureRowReconstructionForecaster:
             raise RuntimeError("重建模型尚未完成训练")
         return {
             "version": self.version,
+            "oracle_candidate": self.oracle_candidate,
+            "oracle_only": self.oracle_only,
+            "diagnostic_only": self.diagnostic_only,
+            "causal": self.causal,
+            "formal_candidate": self.formal_candidate,
+            "deployable": self.deployable,
+            "production_candidate": self.production_candidate,
+            "research_only": self.research_only,
+            "uses_future_rows": True,
+            "production_path_allowed": False,
+            "selection_allowed": False,
+            "weights_allowed": False,
+            "thresholds_allowed": False,
+            "oracle_reason": self.oracle_reason,
             "validation_policy": "last_rows_forward_holdout",
             "validation_rows": self.validation_rows,
             "targets": {
@@ -161,13 +190,21 @@ class FutureRowReconstructionForecaster:
         scoring_frame: pd.DataFrame,
         base_predictions: pd.DataFrame,
     ) -> tuple[pd.DataFrame, dict[str, object]]:
-        """覆盖评分输入可达的目标时刻，越界单元保留基础模型预测。"""
+        """覆盖评分输入可达的目标时刻，越界单元保留基础模型预测。
+
+        该签名只接受 ``scoring_frame`` 和完整的基础预测表。生产模型通用接口
+        通常传入因果特征与当前值表（第二个表只有目标列），会在字段校验处
+        失败，从而避免该 Oracle 被生产门禁误当成正式模型。
+        """
 
         if not base_predictions.index.equals(scoring_frame.index):
             raise ValueError("基础预测与评分输入必须使用相同时间索引")
         expected = expected_prediction_columns(self.config)
         if list(base_predictions.columns) != expected:
-            raise ValueError("基础预测字段或顺序不符合当前配置")
+            raise ValueError(
+                "ORACLE/DIAGNOSTIC ONLY：未来行重建不能接入因果生产预测接口；"
+                "基础预测字段或顺序不符合研究调用契约"
+            )
         output = base_predictions.copy()
         reconstructed, row_report = self.reconstruct_rows(scoring_frame)
         overwritten = 0

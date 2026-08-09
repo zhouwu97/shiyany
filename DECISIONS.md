@@ -187,3 +187,21 @@
 
 - 5% 项将 pooled MAPE 从 `5.203700%` 降至 `5.195745%`；`generator_1` 改善 `0.001819pp`，`generator_all` 改善 `0.014092pp`，最差折退化仅 `0.008925pp`。10% 的总体改善更大但 recent5 不满足预注册 `3/5` 门槛，不能事后改选；禁止继续试 7%/8%/12% 或新 ARX 状态组合。
 - ARX 与父模型误差相关性为 g1 `0.904788`、gall `0.856765`、pooled `0.859856`，证明它是不同于树残差的误差结构，但当前只保留研究分支。两次同配置运行的 OOF SHA-256 完全一致：`A5887C57EE4930F452D66FD6A8F231E125AF8B6DA86BA93083C3F8F06EA7C8ED`。`formal_candidate=false`，不读 blind、不生产重训、不修改 `results/best/` 或 `提交这个/`；产物位于 `results/raw/runs/experiments/a61_recursive_arx_diversity_development_20260804/` 和 `results/raw/runs/experiments/a61_recursive_arx_diversity_verification_20260804/`。
+
+## 2026-08-09 FutureRowReconstruction Oracle 隔离
+
+- `FutureRowReconstructionForecaster` 明确冻结为 `ORACLE / DIAGNOSTIC ONLY`：它按
+  `origin + horizon` 读取评分期未来生产行，故对未来扰动敏感，`oracle_candidate=true`、
+  `causal=false`、`formal_candidate=false`、`deployable=false`。不得将它包装成合法模型，
+  不得把评分期未来生产量、未来 generator 真值、blind 标签或平台参考成绩用于训练、
+  特征、选择、权重或阈值。
+- 正式 `auto_pipeline` 版本白名单不包含该模型；`prepare_submission` 对候选名和元数据
+  执行硬拒绝，不能从 Oracle 运行初始化 `results/best` 或写入正式提交目录。Production
+  Gate 文件保持不变；即使外部伪造通用收据，Oracle 产物也没有正式文件契约并会被提交
+  入口拒绝。
+- 研究脚本必须显式传入 `--allow-oracle-research`，且只能写全新的
+  `results/oracle/<name>/`；只生成模型、诊断输入/预测、报告和拒绝型 manifest，不生成
+  `submission.zip`、不复制到 `results/raw/runs`、`results/best` 或 `提交这个*`。
+- 未来扰动测试要求：修改、shuffle、null、删除 origin 之后的全部生产数据时，Oracle
+  输出允许变化并必须标注非因果；正式因果模型的 16 个预测仍须逐元素不变，不能用该
+  Oracle 结果替代正式泄漏审计。
