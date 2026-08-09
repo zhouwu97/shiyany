@@ -1,5 +1,48 @@
 # 实验结果
 
+## 2026-08-09 X0 P3 Oracle Ceiling Audit（标签知情诊断上限）
+
+只读复用 `p3_rolling_training_20260809_190558` 的 development OOF，不重训。
+键契约：19 折、3,648 origin、58,368 行、无 blind、完整键一致（四条候选独立
+OOF 与集成 OOF shared=58,368 / integration_only=0 / route_only=0）。
+
+| 候选/参考 | pooled MAPE |
+| --- | ---: |
+| A61 parent | 5.195745% |
+| P3 静态融合（80% A61 + 20% A64） | 5.159141% |
+| A64 DirectDelta | 5.328928% |
+| P1 CausalRolling | 5.543435% |
+| P2 HistoricalAnalog | 5.504724% |
+| P2 MaturedResidual | 6.575605% |
+
+| Oracle 层级 | MAPE | gap vs A61 | gap vs P3 | 选中候选数 |
+| --- | ---: | ---: | ---: | ---: |
+| row | 3.376515% | +1.819230pp | +1.782626pp | 5 |
+| origin | 4.191370% | +1.004375pp | +0.967770pp | 5 |
+| fold | 5.111658% | +0.084087pp | +0.047482pp | 4 |
+| target | 5.195745% | +0.000000pp | -0.036604pp | 1 |
+| horizon | 5.195745% | +0.000000pp | -0.036604pp | 1 |
+| target×horizon | 5.195745% | +0.000000pp | -0.036604pp | 1 |
+| split-half 前半→后半 | 4.994948% | +0.200797pp | +0.164193pp | - |
+| split-half 后半→前半 | 5.621315% | -0.425570pp | -0.462174pp | - |
+| split-half 双向均值 | 5.308113% | - | - | - |
+
+行级候选命中率：a61_parent 16.79%、a64_direct_delta 21.75%、p1_causal_rolling
+17.92%、p2_historical_analog 22.54%、p2_matured_residual 20.99%。
+
+预注册判定：row oracle `3.376515% <= 4.9%` → `DYNAMIC_ROUTING_SPACE_EXISTS`
+（阈值固定 0.049，未修改）。粗粒度（target/horizon/单元）无路由增益；
+动态路由头寸集中在 origin/row 粒度，fold 粒度 split-half 双向均值
+`5.308113%` 对 A61 无稳定正收益，反向方向为负。全部产物
+`results/raw/runs/audits/x0_oracle_ceiling_20260809/`，标记
+`label_informed_diagnostic=true`、`formal_candidate=false`、`production_usage=FORBIDDEN`，
+不进 `results/best`、不产生提交。report.json SHA-256
+`25CF238C3F58896733002B428DF6967FE09B8BA76C1F713015E2BBB83DEC9BC2`；
+oracle_selection_trajectory.csv SHA-256
+`AB888C8E1A4BF69291C5B9E4888412A4240AEE0B5EC0708CE81120C366A55709`；
+oracle_ceiling_manifest.json SHA-256
+`5C4724ECB008387FBD3CDB9A88BBC05FBDE7966F6F1395AEC4E397B088E15644`。
+
 ## 2026-08-09 平台真实评分
 
 提交：`提交这个_训练优化_复跑/咕咕嘎嘎_gas_predict_prelim.zip`

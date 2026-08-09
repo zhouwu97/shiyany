@@ -1,5 +1,40 @@
 # 决策记录
 
+## 2026-08-09 X0 P3 Oracle Ceiling Audit（诊断结论，不晋级）
+
+- 新增 `code/gas_forecast/oracle_ceiling.py` + `scripts/run_oracle_ceiling.py` +
+  `tests/test_oracle_ceiling.py`：只读复用 P3 滚动训练的 19 折 development OOF，
+  不重训、不读 blind、不改 `results/best` 与正式提交。键契约独立复核通过：
+  19 折、3,648 个 origin、58,368 行、无 blind、主键唯一、origin 矩阵完整、
+  每折单一 train_end、origin 连续 15 分钟网格；A61/P1/Matured/Analog/A64 四条
+  独立 OOF 与集成 OOF 完整键逐条一致（shared=58,368、integration_only=0、
+  route_only=0）。A61 pooled MAPE `5.195745%`、P3 静态融合 `5.159141%` 均逐位
+  复现冻结报告。
+- Oracle 上限（离散候选 argmin，pooled cell MAPE，epsilon=1e-6）：row oracle
+  `3.376515%`（相对 A61 `+1.819230pp`、相对 P3 `+1.782626pp`，5 个候选全部被选）；
+  origin oracle `4.191370%`（`+1.004375pp` / `+0.967770pp`）；fold oracle
+  `5.111658%`（`+0.084087pp` / `+0.047482pp`）；target、horizon、target×horizon
+  三个粗粒度 oracle 均与 A61 相同（`5.195745%`，A61 在每个 target/horizon/单元
+  都是最优单候选，粗粒度路由无增益，P3 融合的 pooled 优势来自误差抵消而非
+  单元级选择）。split-half 双向：前半选/后半评 `4.994948%`（`+0.200797pp`），
+  后半选/前半评 `5.621315%`（`-0.425570pp`），双向均值 `5.308113%`——折粒度
+  诚实路由估计对 A61 无稳定正收益，反向方向为负，说明行/单元级上限主要由
+  不可稳定预测的逐行波动构成。
+- 预注册判定执行（阈值固定 0.049 未改）：row oracle `3.376515% <= 4.9%`，
+  判定为 `DYNAMIC_ROUTING_SPACE_EXISTS`——现有候选存在显著动态路由空间，
+  值得继续开发可部署的动态路由（origin 粒度 `+1.0pp` 级头寸），但 fold 粒度
+  split-half 双向均值为负方向风险，任何动态路由必须以前半选择/后半评估的
+  诚实口径验证；本结论仅限诊断。
+- 行级候选命中率：a61_parent `16.79%`、a64_direct_delta `21.75%`、
+  p1_causal_rolling `17.92%`、p2_historical_analog `22.54%`、
+  p2_matured_residual `20.99%`（5 候选均被逐行选中）。逐行选择轨迹、
+  oracle_winners、oracle_gaps、hit_rates、split-half 明细与报告/拒绝型
+  manifest 全部落在 `results/raw/runs/audits/x0_oracle_ceiling_20260809/`；
+  所有 oracle 标记 `label_informed_diagnostic=true`、`formal_candidate=false`、
+  `production_usage=FORBIDDEN`，不进入生产。report.json SHA-256
+  `25CF238C3F58896733002B428DF6967FE09B8BA76C1F713015E2BBB83DEC9BC2`，
+  manifest `5C4724ECB008387FBD3CDB9A88BBC05FBDE7966F6F1395AEC4E397B088E15644`。
+
 ## 2026-08-09 Q4 reference-quality input A/B 包
 
 - 预测来源审计确认：A61 目录只有 development/verification 的 `oof.csv`、报告与训练收据，
