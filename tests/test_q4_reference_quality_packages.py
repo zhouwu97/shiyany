@@ -14,9 +14,7 @@ from scripts.run_q4_reference_quality_packages import run_q4
 
 def _input_frame(start: str, rows: int) -> pd.DataFrame:
     positions = np.arange(rows, dtype=float)
-    frame = pd.DataFrame(
-        {"datetime": pd.date_range(start, periods=rows, freq="15min").astype(str)}
-    )
+    frame = pd.DataFrame({"datetime": pd.date_range(start, periods=rows, freq="15min").astype(str)})
     for offset, column in enumerate(COMPETITION_RAW_COLUMNS, start=1):
         frame[column] = positions * (offset + 0.25) + offset**2
     frame["feat_keep"] = np.sin(positions / 7.0) + positions / 100.0
@@ -61,9 +59,7 @@ def test_q4_uses_formal_chain_and_keeps_shared_result_bytes(tmp_path: Path) -> N
         train_end="2025-01-03 15:45:00",
     )
 
-    assert report["formal_chain"]["api"] == (
-        "gas_forecast.submission.prepare_submission_chain"
-    )
+    assert report["formal_chain"]["api"] == ("gas_forecast.submission.prepare_submission_chain")
     assert report["formal_chain"]["future_perturbation_passed"] is True
     assert report["formal_chain"]["q_reference_feeds_model"] is False
     assert report["s_result_freeze"]["all_byte_identical"] is True
@@ -72,9 +68,7 @@ def test_q4_uses_formal_chain_and_keeps_shared_result_bytes(tmp_path: Path) -> N
     assert report["platform"]["quality_score"] is None
 
     for name in ("SUB_A_Q_CAUSAL", "SUB_B_Q_REFERENCE"):
-        assert sorted(path.name for path in (output / name).iterdir()) == sorted(
-            SUBMISSION_MEMBERS
-        )
+        assert sorted(path.name for path in (output / name).iterdir()) == sorted(SUBMISSION_MEMBERS)
         with ZipFile(output / f"{name}.zip") as archive:
             assert archive.namelist() == list(SUBMISSION_MEMBERS)
             assert archive.read("s_result.csv") == result_bytes
@@ -85,7 +79,5 @@ def test_q4_uses_formal_chain_and_keeps_shared_result_bytes(tmp_path: Path) -> N
     assert terminal["duplicate_columns"] == []
     assert terminal["iqr_outlier_cells_all_methods"] == 0
     assert terminal["zscore_outlier_cells"] == 0
-    assert report["SUB_B"]["write_read_back"]["input.csv"][
-        "numeric_values_match"
-    ] is True
+    assert report["SUB_B"]["write_read_back"]["input.csv"]["numeric_values_match"] is True
     assert scoring_path.read_bytes() == scoring_bytes_before

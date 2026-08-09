@@ -200,9 +200,7 @@ def _mechanical_metrics(frame: pd.DataFrame, result: pd.DataFrame) -> dict[str, 
         },
         "out": {
             "iqr_outlier_cells_linear": int(quality["iqr_outlier_cells"]),
-            "iqr_outlier_cells_all_methods": int(
-                quality["iqr_outlier_cells_all_methods"]
-            ),
+            "iqr_outlier_cells_all_methods": int(quality["iqr_outlier_cells_all_methods"]),
             "abs_z_gt_3_cells": int(quality["zscore_outlier_cells"]),
         },
         "intv": {
@@ -217,9 +215,7 @@ def _mechanical_metrics(frame: pd.DataFrame, result: pd.DataFrame) -> dict[str, 
         "invalid_col": {
             "nonfinite_or_nonnumeric_columns": invalid_columns,
             "unexpected_raw_columns": schema["unexpected_raw_columns"],
-            "count": int(
-                len(set(invalid_columns).union(schema["unexpected_raw_columns"]))
-            ),
+            "count": int(len(set(invalid_columns).union(schema["unexpected_raw_columns"]))),
         },
         "feat": {
             "feature_columns": int(schema["feature_column_count"]),
@@ -283,9 +279,7 @@ def run_q4(
     training_record = _materialize_training_input(
         training_file,
         training_input=None if training_input is None else training_input.resolve(),
-        training_data_dir=(
-            None if training_data_dir is None else training_data_dir.resolve()
-        ),
+        training_data_dir=(None if training_data_dir is None else training_data_dir.resolve()),
         model_path=None if model_path is None else model_path.resolve(),
     )
     training_hash_before = _sha256_file(training_file)
