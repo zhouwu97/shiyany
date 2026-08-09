@@ -175,17 +175,25 @@ def _strict_candidate_positions(
     validation_start: pd.Timestamp,
     context: int,
 ) -> np.ndarray:
-    """返回完整轨迹严格结束在 held fold 前的有效历史 analog origins。"""
+    """返回候选窗口和完整未来轨迹都位于训练截止点前的 origins。
+
+    ``train_end`` 是本次类比搜索可见历史的严格截止点，而不是“最后一个
+    可以拿来当候选 origin 的时刻”。候选 ``j`` 的 context 窗口必须从
+    ``train_start`` 之后开始，且第八步真值 ``j + 120min`` 必须严格早于
+    ``train_end``。这会拒绝虽然早于 held fold、但借用了训练截止点之后
+    标签的伪历史候选。
+    """
 
     trajectory_end = prepared.index + pd.Timedelta(minutes=MAX_TRAJECTORY_MINUTES)
+    context_start = prepared.index - pd.Timedelta(minutes=STEP_MINUTES * (context - 1))
+    before_training_cutoff = trajectory_end < pd.Timestamp(train_end)
     before_held_fold = trajectory_end < pd.Timestamp(validation_start)
-    in_outer_train = (prepared.index >= pd.Timestamp(train_start)) & (
-        prepared.index <= pd.Timestamp(train_end)
-    )
+    window_in_training_history = context_start >= pd.Timestamp(train_start)
     features = prepared.features_by_context[context]
     valid = (
-        before_held_fold
-        & in_outer_train
+        before_training_cutoff
+        & before_held_fold
+        & window_in_training_history
         & np.isfinite(features).all(axis=1)
         & np.isfinite(prepared.trajectories).all(axis=1)
     )
@@ -215,8 +223,9 @@ def _predict_target_for_origins(
 ) -> pd.DataFrame:
     """以一个固定配置对若干 held origins 预测八步增量轨迹。
 
-    重要边界：候选 ``j`` 的最后标签为 ``j + 120min``，并要求它严格
-    小于 held fold 的开始时刻。特征标准化也只在这些候选轨迹上拟合。
+    重要边界：候选 ``j`` 的 context 窗口与最后标签 ``j + 120min`` 都
+    必须位于 ``train_end`` 严格之前；随后仍额外验证它早于 held fold。
+    特征标准化也只在这些完整历史候选轨迹上拟合。
     """
 
     positions = prepared.index.get_indexer(origins)
@@ -232,30 +241,34 @@ def _predict_target_for_origins(
     )
     query = features[positions]
     count = len(origins)
+    if len(candidate_positions) < spec.neighbors:
+        raise ValueError(
+            "严格历史候选不足："
+            f"配置 {spec.name} 需要 {spec.neighbors} 条，实际只有 {len(candidate_positions)} 条"
+        )
     prediction_delta = np.zeros((count, len(HORIZONS)), dtype=float)
     nearest_distance = np.full(count, np.nan, dtype=float)
     median_neighbor_distance = np.full(count, np.nan, dtype=float)
     effective_neighbor_count = np.zeros(count, dtype=float)
     uncertainty = np.full((count, len(HORIZONS)), np.nan, dtype=float)
-    fallback = np.ones(count, dtype=bool)
+    fallback = np.zeros(count, dtype=bool)
 
     valid_query = np.isfinite(query).all(axis=1) & np.isfinite(prepared.values[positions])
-    if len(candidate_positions) and valid_query.any():
-        train = features[candidate_positions]
-        scaled_train, scaled_query = _standardize_from_training(train, query[valid_query])
-        neighbors = min(spec.neighbors, len(candidate_positions))
-        # metric 固定为 Euclidean；NearestNeighbors 仅消费训练期冻结后的向量。
-        finder = NearestNeighbors(n_neighbors=neighbors, metric="euclidean")
-        finder.fit(scaled_train)
-        distances, local_indices = finder.kneighbors(scaled_query, return_distance=True)
-        selected_deltas = prepared.trajectories[candidate_positions[local_indices]]
-        valid_positions = np.flatnonzero(valid_query)
-        prediction_delta[valid_positions] = np.median(selected_deltas, axis=1)
-        nearest_distance[valid_positions] = distances[:, 0]
-        median_neighbor_distance[valid_positions] = np.median(distances, axis=1)
-        effective_neighbor_count[valid_positions] = float(neighbors)
-        uncertainty[valid_positions] = selected_deltas.std(axis=1, ddof=0)
-        fallback[valid_positions] = False
+    if not valid_query.all():
+        invalid_count = int((~valid_query).sum())
+        raise ValueError(f"严格历史类比查询缺少完整因果窗口或当前值: {invalid_count} 条")
+    train = features[candidate_positions]
+    scaled_train, scaled_query = _standardize_from_training(train, query)
+    # metric 固定为 Euclidean；NearestNeighbors 仅消费训练期冻结后的向量。
+    finder = NearestNeighbors(n_neighbors=spec.neighbors, metric="euclidean")
+    finder.fit(scaled_train)
+    distances, local_indices = finder.kneighbors(scaled_query, return_distance=True)
+    selected_deltas = prepared.trajectories[candidate_positions[local_indices]]
+    prediction_delta[:] = np.median(selected_deltas, axis=1)
+    nearest_distance[:] = distances[:, 0]
+    median_neighbor_distance[:] = np.median(distances, axis=1)
+    effective_neighbor_count[:] = float(spec.neighbors)
+    uncertainty[:] = selected_deltas.std(axis=1, ddof=0)
 
     anchor = prepared.values[positions]
     predictions = anchor[:, None] + prediction_delta
@@ -266,6 +279,10 @@ def _predict_target_for_origins(
         "effective_neighbor_count": effective_neighbor_count,
         "fallback_to_persistence": fallback,
         "candidate_pool_count": np.full(count, len(candidate_positions), dtype=int),
+        "candidate_window_and_trajectory_before_train_cutoff": np.full(
+            count, True, dtype=bool
+        ),
+        "candidate_trajectory_end_before_train_cutoff": np.full(count, True, dtype=bool),
         "candidate_trajectory_end_before_validation": np.full(count, True, dtype=bool),
     }
     for offset, horizon in enumerate(HORIZONS):
@@ -309,6 +326,8 @@ def _prediction_long(
                     "effective_neighbor_count",
                     "fallback_to_persistence",
                     "candidate_pool_count",
+                    "candidate_window_and_trajectory_before_train_cutoff",
+                    "candidate_trajectory_end_before_train_cutoff",
                     "candidate_trajectory_end_before_validation",
                     f"analog_uncertainty_t+{minutes}",
                     f"prediction_t+{minutes}",
@@ -577,6 +596,12 @@ def build_historical_analog_oof(
                     "analog_uncertainty": f"{spec.name}_analog_uncertainty",
                     "fallback_to_persistence": f"{spec.name}_fallback_to_persistence",
                     "candidate_pool_count": f"{spec.name}_candidate_pool_count",
+                    "candidate_window_and_trajectory_before_train_cutoff": (
+                        f"{spec.name}_window_and_trajectory_before_train_cutoff"
+                    ),
+                    "candidate_trajectory_end_before_train_cutoff": (
+                        f"{spec.name}_trajectory_before_train_cutoff"
+                    ),
                     "candidate_trajectory_end_before_validation": (
                         f"{spec.name}_trajectory_safe"
                     ),
@@ -601,6 +626,8 @@ def build_historical_analog_oof(
                 "analog_uncertainty",
                 "fallback_to_persistence",
                 "candidate_pool_count",
+                "candidate_window_and_trajectory_before_train_cutoff",
+                "candidate_trajectory_end_before_train_cutoff",
                 "candidate_trajectory_end_before_validation",
             ],
         ]
@@ -609,6 +636,10 @@ def build_historical_analog_oof(
         base["selected_neighbors"] = selected.neighbors
         base["selected_metric"] = selected.metric
         base["selection_used_held_fold_labels"] = False
+        if not base["candidate_window_and_trajectory_before_train_cutoff"].all():
+            raise RuntimeError(f"折 {fold.name} 存在越过训练截止点的 analog 候选")
+        if not base["candidate_trajectory_end_before_train_cutoff"].all():
+            raise RuntimeError(f"折 {fold.name} 存在越过训练截止点的 analog 未来标签")
         if not base["candidate_trajectory_end_before_validation"].all():
             raise RuntimeError(f"折 {fold.name} 存在跨 held fold 的 analog trajectory")
         parts.append(base)
@@ -620,14 +651,17 @@ def build_historical_analog_oof(
                 "train_end": fold.train_end,
                 "validation_start": fold.validation_start,
                 "validation_end": fold.validation_end,
-                "candidate_trajectory_latest_end": fold.validation_start
+                "candidate_trajectory_latest_end": fold.train_end
                 - pd.Timedelta(minutes=STEP_MINUTES),
+                "candidate_training_cutoff": fold.train_end,
+                "candidate_window_and_trajectory_before_train_cutoff": True,
                 "selected_context": selected.context,
                 "selected_neighbors": selected.neighbors,
                 "selected_metric": selected.metric,
                 "selection_used_held_fold_labels": False,
                 "selection_data_end": fold.train_end,
-                "candidate_pool_max_time": fold.train_end,
+                "candidate_pool_max_time": fold.train_end
+                - pd.Timedelta(minutes=MAX_TRAJECTORY_MINUTES + STEP_MINUTES),
                 "nested_cross_fitting": bool(selection_trace["nested_cross_fitting"]),
                 "selection_reason": str(selection_trace["selection_reason"]),
                 "inner_folds": json.dumps(selection_trace["inner_folds"]),
@@ -665,7 +699,7 @@ def build_historical_analog_oof(
         "horizons_minutes": [STEP_MINUTES * horizon for horizon in horizons],
         "pre_registered_search": [asdict(spec) for spec in registered],
         "distance_metric": "euclidean",
-        "trajectory_rule": "candidate_j + 120min < validation_start",
+        "trajectory_rule": "candidate_window_start >= train_start and candidate_j + 120min < train_end",
         "nested_cross_fitting": True,
         "folds": [fold.name for fold in folds],
         "metrics": metrics,
@@ -692,9 +726,9 @@ def predict_historical_analog_at_origin(
 ) -> pd.DataFrame:
     """在单个 origin 产出 16 个严格因果预测和四项距离诊断。
 
-    该公共入口用于未来扰动审计。它通过把一个 15 分钟后的边界视为
-    ``validation_start``，允许候选轨迹至多结束在 origin 本身，绝不读取
-    origin 之后的生产值。
+    该公共入口用于未来扰动审计。它把下一个 15 分钟刻度作为严格训练
+    截止点，因此候选完整轨迹至多结束在 origin 本身，绝不读取 origin
+    之后的生产值。
     """
 
     validate_pre_registered_specs((spec,))
@@ -711,7 +745,7 @@ def predict_historical_analog_at_origin(
         pd.DatetimeIndex([timestamp]),
         spec,
         train_start=values.index.min(),
-        train_end=timestamp - pd.Timedelta(minutes=MAX_TRAJECTORY_MINUTES),
+        train_end=timestamp + pd.Timedelta(minutes=STEP_MINUTES),
         validation_start=timestamp + pd.Timedelta(minutes=STEP_MINUTES),
         targets=targets,
         horizons=HORIZONS,
