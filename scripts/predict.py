@@ -6,6 +6,10 @@ import argparse
 from pathlib import Path
 
 from gas_forecast.workflow import predict_rolling
+from gas_forecast.submission_quality import (
+    COMPETITION_QUALITY_POLICY,
+    prepare_submission_input,
+)
 
 
 def main() -> None:
@@ -18,7 +22,10 @@ def main() -> None:
 
     features, predictions = predict_rolling(args.train_dir, args.test_dir, args.model)
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    feature_output = features.reset_index()
+    feature_output, _ = prepare_submission_input(
+        features.reset_index(),
+        COMPETITION_QUALITY_POLICY,
+    )
     result_output = predictions.reset_index()
     feature_output.to_csv(args.output_dir / "input.csv", index=False, encoding="utf-8")
     result_output.to_csv(args.output_dir / "s_result.csv", index=False, encoding="utf-8")
@@ -27,4 +34,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

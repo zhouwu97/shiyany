@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import asdict, replace
 from pathlib import Path
+
+import pandas as pd
 
 from gas_forecast.config import ForecastConfig, forecast_config_from_dict
 from gas_forecast.data import align_tables
 from gas_forecast.experiments import finalize_run, new_run_dir, write_json
 from gas_forecast.features import load_price_schedule
 from gas_forecast.research import (
+    _candidate_comparison,
     build_research_oof,
     filter_research_candidate_names,
     make_online_combination_candidate,
@@ -25,6 +29,12 @@ EXPERIMENT_IDS = (
     "E13_gen1_alpha_group",
     "E20_gen1_recency_hard",
     "E21_gen1_recency_exp",
+    "E22_damped_trend",
+    "E23b_relation_ridge",
+    "E24_ramp_features",
+    "E25_analog_weighted_median",
+    "E25b_analog_local_ridge",
+    "E26_grouped_recency",
     "E30_gen1_time_slot",
     "E31_gen1_fourier",
     "E32_gen1_slot_fourier",
@@ -97,6 +107,20 @@ def parse_args() -> argparse.Namespace:
         "--base-candidate-name",
         help="当 --base-config 指向研究 report.json 时指定要继承的候选名称",
     )
+    parser.add_argument(
+        "--relation-report",
+        type=Path,
+        help="E23 report.json；读取其中已冻结的 relation feature specs",
+    )
+    parser.add_argument(
+        "--champion-oof",
+        type=Path,
+        help="C0 的严格 OOF 长表；提供后所有候选均与 C0 而不是 e10 比较",
+    )
+    parser.add_argument(
+        "--champion-column",
+        help="C0 OOF 中的预测列，例如 v2_v3_target_reconciled_pred",
+    )
     parser.add_argument("--run-dir", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--report", type=Path)
@@ -108,6 +132,19 @@ def _relative_or_absolute(path: Path, root: Path) -> str:
         return str(path.relative_to(root))
     except ValueError:
         return str(path)
+
+
+def _resolve_data_dir(path: Path) -> Path:
+    """兼容 Windows 执行器，允许传入 ASCII 官方数据父目录。"""
+
+    if (path / "Pre_gas.csv").exists():
+        return path
+    matches = sorted(
+        child for child in path.iterdir() if child.is_dir() and (child / "Pre_gas.csv").exists()
+    )
+    if len(matches) != 1:
+        raise FileNotFoundError(f"无法解析官方数据目录: {path}")
+    return matches[0]
 
 
 def _load_base_config(path: Path, candidate_name: str | None) -> ForecastConfig:
@@ -146,6 +183,18 @@ def main() -> None:
         if args.base_config
         else ForecastConfig()
     )
+    if args.relation_report:
+        relation_payload = json.loads(args.relation_report.read_text(encoding="utf-8"))
+        frozen = relation_payload.get("frozen_relation_features", [])
+        if not isinstance(frozen, list) or not frozen:
+            raise ValueError("relation report 没有可用的 frozen_relation_features")
+        config = replace(
+            config,
+            feature=replace(
+                config.feature,
+                relation_features=tuple(str(item) for item in frozen),
+            ),
+        )
     candidates = (
         [make_online_combination_candidate(config, tuple(args.online_combination))]
         if args.online_combination
@@ -172,8 +221,9 @@ def main() -> None:
         candidates = baseline_candidates + [
             candidate for candidate in candidates if candidate.name not in {item.name for item in baseline_candidates}
         ]
-    dataset = align_tables(args.data_dir, config.feature.frequency)
-    prices = sorted(args.data_dir.glob("*price*.xlsx"))
+    data_dir = _resolve_data_dir(args.data_dir)
+    dataset = align_tables(data_dir, config.feature.frequency)
+    prices = sorted(data_dir.glob("*price*.xlsx"))
     price_schedule = load_price_schedule(prices[0]) if prices else None
     result = build_research_oof(
         dataset.frame,
@@ -184,14 +234,48 @@ def main() -> None:
         checkpoint_dir=run_dir / "checkpoints",
         baseline_name=baseline_name,
     )
+    if args.champion_oof:
+        if not args.champion_column:
+            raise ValueError("--champion-oof 必须同时提供 --champion-column")
+        champion_rows = pd.read_csv(
+            args.champion_oof,
+            parse_dates=["origin_time"],
+        )
+        keys = ["fold", "origin_time", "target", "horizon"]
+        champion = champion_rows.loc[
+            :, keys + [args.champion_column]
+        ].rename(columns={args.champion_column: "c0_champion_pred"})
+        output_rows = result.rows.merge(
+            champion, on=keys, how="left", validate="one_to_one"
+        )
+        if output_rows["c0_champion_pred"].isna().any():
+            raise ValueError("C0 OOF 未覆盖研究候选的全部严格 OOF 行")
+        result.report["models"] = {
+            candidate.name: _candidate_comparison(
+                output_rows,
+                f"{candidate.name}_pred",
+                "c0_champion_pred",
+                scope=args.scope,
+            )
+            for candidate in candidates
+        }
+        result.report["baseline"] = "c0_champion"
+        result.report["champion_oof"] = str(args.champion_oof.resolve())
+        result.report["champion_column"] = args.champion_column
+    else:
+        output_rows = result.rows
     output.parent.mkdir(parents=True, exist_ok=True)
-    result.rows.to_csv(output, index=False, encoding="utf-8")
+    output_rows.to_csv(output, index=False, encoding="utf-8")
     write_json(report_path, result.report)
     pooled = [
-        value["pooled_mape"]
+        float(value["pooled_mape"])
         for value in result.report["models"].values()
-        if isinstance(value, dict) and isinstance(value.get("pooled_mape"), float)
+        if isinstance(value, dict)
+        and isinstance(value.get("pooled_mape"), (int, float))
     ]
+    fingerprints = result.report.get("checkpoint_fingerprint", {})
+    if not isinstance(fingerprints, dict):
+        fingerprints = {}
     finalize_run(
         run_dir,
         {
@@ -204,6 +288,16 @@ def main() -> None:
             "pooled_mape": min(pooled) if pooled else None,
             "baseline": result.report["baseline"],
             "base_config": str(args.base_config) if args.base_config else None,
+            "relation_report": str(args.relation_report) if args.relation_report else None,
+            "champion_oof": str(args.champion_oof) if args.champion_oof else None,
+            "champion_column": args.champion_column,
+            "config": {
+                "targets": list(config.targets),
+                "feature": asdict(config.feature),
+                "model": asdict(config.model),
+                "validation": asdict(config.validation),
+            },
+            **fingerprints,
             "report": _relative_or_absolute(report_path, run_dir),
             "oof": _relative_or_absolute(output, run_dir),
         },

@@ -1,0 +1,257 @@
+{
+  "candidate_shape": [
+    192,
+    703
+  ],
+  "reference_shape": [
+    192,
+    708
+  ],
+  "candidate_quality": {
+    "policy": "prelim_reference_compatible_v1",
+    "raw_columns": [
+      "blast_furnace_1",
+      "blast_furnace_2",
+      "blast_furnace_4",
+      "blast_furnace_5",
+      "coke_oven_1",
+      "converter_1",
+      "air_heater_1",
+      "air_heater_2",
+      "air_heater_4",
+      "air_heater_5",
+      "into_gas_mixed_coke",
+      "into_gas_mixed_blast_furnace",
+      "into_gas_mixed_converter",
+      "blast_furnace_gas_holder_2",
+      "blast_furnace_user1",
+      "blast_furnace_user2",
+      "blast_furnace_user3",
+      "blast_furnace_user4",
+      "converter_user1",
+      "converter_user2",
+      "generator_all",
+      "generator_1",
+      "generator_use_blast_furnace_gas",
+      "generator_use_coke_gas",
+      "generator_use_converter_gas"
+    ],
+    "raw_column_count": 25,
+    "feature_column_count": 677,
+    "unexpected_raw_columns": [
+      "air_heater_5",
+      "blast_furnace_user4",
+      "converter_user1",
+      "into_gas_mixed_blast_furnace"
+    ],
+    "missing_required_raw_columns": [],
+    "constant_raw_columns": [
+      "air_heater_5",
+      "converter_user1"
+    ],
+    "iqr_violations": {
+      "air_heater_4": 0,
+      "blast_furnace_1": 0,
+      "blast_furnace_4": 0,
+      "blast_furnace_5": 0,
+      "coke_oven_1": 0,
+      "converter_1": 0,
+      "generator_1": 13,
+      "generator_use_coke_gas": 0,
+      "generator_use_converter_gas": 0,
+      "into_gas_mixed_coke": 0,
+      "into_gas_mixed_converter": 10
+    },
+    "iqr_bounds": {
+      "air_heater_4": {
+        "lower": 30410.623000000007,
+        "upper": 174221.59149999998
+      },
+      "blast_furnace_1": {
+        "lower": 343300.285,
+        "upper": 436099.93000000005
+      },
+      "blast_furnace_4": {
+        "lower": 395590.26,
+        "upper": 431526.2100000001
+      },
+      "blast_furnace_5": {
+        "lower": 398393.5300000001,
+        "upper": 409422.2949999999
+      },
+      "coke_oven_1": {
+        "lower": 63419.02875,
+        "upper": 72635.4975
+      },
+      "converter_1": {
+        "lower": 15.188006749999996,
+        "upper": 20.341725500000003
+      },
+      "generator_1": {
+        "lower": 88.67800500000001,
+        "upper": 119.00161499999999
+      },
+      "generator_use_coke_gas": {
+        "lower": -2602.504925,
+        "upper": 5205.00985
+      },
+      "generator_use_converter_gas": {
+        "lower": 2521.356500000009,
+        "upper": 61435.41349999999
+      },
+      "into_gas_mixed_coke": {
+        "lower": 32708.09625000001,
+        "upper": 51763.89224999999
+      },
+      "into_gas_mixed_converter": {
+        "lower": 65000.000500000024,
+        "upper": 102935.79024999999
+      }
+    },
+    "total_iqr_violations": 23
+  },
+  "reference_quality": {
+    "policy": "prelim_reference_compatible_v1",
+    "raw_columns": [
+      "blast_furnace_1",
+      "blast_furnace_2",
+      "blast_furnace_4",
+      "blast_furnace_5",
+      "coke_oven_1",
+      "converter_1",
+      "air_heater_1",
+      "air_heater_2",
+      "air_heater_4",
+      "into_gas_mixed_coke",
+      "into_gas_mixed_converter",
+      "blast_furnace_gas_holder_2",
+      "blast_furnace_user1",
+      "blast_furnace_user2",
+      "blast_furnace_user3",
+      "converter_user2",
+      "generator_all",
+      "generator_1",
+      "generator_use_blast_furnace_gas",
+      "generator_use_coke_gas",
+      "generator_use_converter_gas"
+    ],
+    "raw_column_count": 21,
+    "feature_column_count": 686,
+    "unexpected_raw_columns": [],
+    "missing_required_raw_columns": [],
+    "constant_raw_columns": [],
+    "iqr_violations": {
+      "air_heater_4": 1,
+      "blast_furnace_1": 0,
+      "blast_furnace_4": 0,
+      "blast_furnace_5": 20,
+      "coke_oven_1": 0,
+      "converter_1": 1,
+      "generator_1": 14,
+      "generator_use_coke_gas": 0,
+      "generator_use_converter_gas": 10,
+      "into_gas_mixed_coke": 13,
+      "into_gas_mixed_converter": 10
+    },
+    "iqr_bounds": {
+      "air_heater_4": {
+        "lower": 30410.623000000007,
+        "upper": 174221.59149999998
+      },
+      "blast_furnace_1": {
+        "lower": 343300.285,
+        "upper": 436099.93000000005
+      },
+      "blast_furnace_4": {
+        "lower": 397722.0199999999,
+        "upper": 430460.33000000013
+      },
+      "blast_furnace_5": {
+        "lower": 398393.5300000001,
+        "upper": 409422.2949999999
+      },
+      "coke_oven_1": {
+        "lower": 63419.02875,
+        "upper": 72635.4975
+      },
+      "converter_1": {
+        "lower": 15.188006749999996,
+        "upper": 20.341725500000003
+      },
+      "generator_1": {
+        "lower": 88.67800500000001,
+        "upper": 119.00161499999999
+      },
+      "generator_use_coke_gas": {
+        "lower": -143.88034,
+        "upper": 287.76068
+      },
+      "generator_use_converter_gas": {
+        "lower": 2521.356500000009,
+        "upper": 61435.41349999999
+      },
+      "into_gas_mixed_coke": {
+        "lower": 32708.09625000001,
+        "upper": 51763.89224999999
+      },
+      "into_gas_mixed_converter": {
+        "lower": 65000.000500000024,
+        "upper": 102935.79024999999
+      }
+    },
+    "total_iqr_violations": 69
+  },
+  "raw_only_candidate": [
+    "air_heater_5",
+    "blast_furnace_user4",
+    "converter_user1",
+    "into_gas_mixed_blast_furnace"
+  ],
+  "raw_only_reference": [],
+  "common_raw_columns": [
+    "air_heater_1",
+    "air_heater_2",
+    "air_heater_4",
+    "blast_furnace_1",
+    "blast_furnace_2",
+    "blast_furnace_4",
+    "blast_furnace_5",
+    "blast_furnace_gas_holder_2",
+    "blast_furnace_user1",
+    "blast_furnace_user2",
+    "blast_furnace_user3",
+    "coke_oven_1",
+    "converter_1",
+    "converter_user2",
+    "generator_1",
+    "generator_all",
+    "generator_use_blast_furnace_gas",
+    "generator_use_coke_gas",
+    "generator_use_converter_gas",
+    "into_gas_mixed_coke",
+    "into_gas_mixed_converter"
+  ],
+  "raw_value_differences": {
+    "air_heater_1": {
+      "different_rows": 2,
+      "max_abs_delta": 102532.75499999999
+    },
+    "blast_furnace_4": {
+      "different_rows": 12,
+      "max_abs_delta": 17673.909999999974
+    },
+    "blast_furnace_5": {
+      "different_rows": 1,
+      "max_abs_delta": 1525.3499999999185
+    },
+    "converter_1": {
+      "different_rows": 20,
+      "max_abs_delta": 4.999999987376214e-07
+    },
+    "generator_use_coke_gas": {
+      "different_rows": 72,
+      "max_abs_delta": 5073.093360000001
+    }
+  },
+  "raw_value_difference_cells": 107
+}

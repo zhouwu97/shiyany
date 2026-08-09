@@ -62,6 +62,15 @@ def resolve_training_config(
     return legacy_forecast_config()
 
 
+def resolve_prediction_feature_config(model: object):
+    """返回与模型训练时一致的推理特征配置。"""
+
+    feature = model.config.feature
+    if str(getattr(model, "version", "")).startswith("generator1_"):
+        return research_feature_superset(feature)
+    return feature
+
+
 def train_model(
     data_dir: str | Path,
     output: str | Path,
@@ -130,11 +139,7 @@ def predict_rolling(
     context = combine_context(train, test)
     price_path = _find_price(train_dir)
     price = load_price_schedule(price_path) if price_path else None
-    feature_config = (
-        research_feature_superset(model.config.feature)
-        if str(getattr(model, "version", "")).startswith("generator1_")
-        else model.config.feature
-    )
+    feature_config = resolve_prediction_feature_config(model)
     features = build_causal_features(context, feature_config, price)
     test_features = features.reindex(test.index)
     predictions = model.predict(

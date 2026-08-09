@@ -1,0 +1,12 @@
+{
+  "candidate": "confirmed_blend_lgb_residual_pred_20",
+  "baseline": "e21_R75_pred",
+  "challenger": "lgb_residual_pred",
+  "weight": 0.2,
+  "blind_rows": 4490,
+  "blind_baseline_mape": 0.057908750318648734,
+  "blind_candidate_mape": 0.05750412276891433,
+  "blind_delta_pp": -0.04046275497344015,
+  "verdict": "BETTER",
+  "selection_used_blind": false
+}

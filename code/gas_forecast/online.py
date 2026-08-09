@@ -60,14 +60,40 @@ class OnlineForecastCalibrator:
         self.bias: dict[tuple[str, int], float] = defaultdict(float)
         self.gain_numerator: dict[tuple[str, str], float] = defaultdict(float)
         self.gain_denominator: dict[tuple[str, str], float] = defaultdict(float)
+        self.last_observed_timestamp: pd.Timestamp | None = None
 
     def _gain_group(self, horizon: int) -> str:
         return "short" if self.horizons.index(horizon) < len(self.horizons) // 2 else "long"
 
     def observe(self, timestamp: pd.Timestamp, actual: pd.Series) -> None:
-        """结算截至当前时刻已经揭晓且真实值可用的历史预测。"""
+        """结算截至当前时刻已经揭晓且真实值可用的历史预测。
+
+        EMA 的时间单位是观测时间戳，而不是“成熟了一条 forecast”。同一
+        15 分钟内成熟的多个 horizon 先按状态组聚合，再只推进一次衰减。
+        """
 
         timestamp = pd.Timestamp(timestamp)
+        if self.last_observed_timestamp is not None and timestamp < self.last_observed_timestamp:
+            raise ValueError("在线校准 observe 时间必须递增")
+        if self.last_observed_timestamp is None:
+            elapsed_steps = 0
+        else:
+            elapsed_minutes = (
+                timestamp - self.last_observed_timestamp
+            ).total_seconds() / 60.0
+            elapsed_steps = max(0, int(round(elapsed_minutes / 15.0)))
+        if elapsed_steps:
+            time_decay = self.decay**elapsed_steps
+            for key in list(self.bias):
+                self.bias[key] *= time_decay
+            for key in list(self.gain_numerator):
+                self.gain_numerator[key] *= time_decay
+            for key in list(self.gain_denominator):
+                self.gain_denominator[key] *= time_decay
+        self.last_observed_timestamp = timestamp
+
+        bias_errors: dict[tuple[str, int], list[float]] = defaultdict(list)
+        gain_stats: dict[tuple[str, str], list[tuple[float, float]]] = defaultdict(list)
         due_times = sorted(due for due in self.pending if due <= timestamp)
         for due_time in due_times:
             matured = self.pending.pop(due_time, [])
@@ -82,28 +108,30 @@ class OnlineForecastCalibrator:
                     continue
                 key = (item.target, item.horizon)
                 if self.mode == "bias":
-                    error = value - item.published_prediction
-                    self.bias[key] = float(
-                        np.clip(
-                            self.decay * self.bias[key] + (1.0 - self.decay) * error,
-                            -self.bias_clip,
-                            self.bias_clip,
-                        )
-                    )
+                    bias_errors[key].append(value - item.published_prediction)
                 elif self.mode == "gain":
                     delta = item.base_prediction - item.anchor
                     group = (item.target, self._gain_group(item.horizon))
                     weight = 1.0 / max(abs(value), 1.0)
-                    self.gain_numerator[group] = (
-                        self.decay * self.gain_numerator[group]
-                        + (1.0 - self.decay) * weight * delta * (value - item.anchor)
-                    )
-                    self.gain_denominator[group] = (
-                        self.decay * self.gain_denominator[group]
-                        + (1.0 - self.decay) * weight * delta * delta
+                    gain_stats[group].append(
+                        (weight * delta * (value - item.anchor), weight * delta * delta)
                     )
             if still_pending:
                 self.pending[due_time].extend(still_pending)
+        update_weight = 1.0 - self.decay
+        for key, errors in bias_errors.items():
+            self.bias[key] = float(
+                np.clip(
+                    self.bias[key] + update_weight * float(np.mean(errors)),
+                    -self.bias_clip,
+                    self.bias_clip,
+                )
+            )
+        for group, stats in gain_stats.items():
+            numerator = float(np.mean([item[0] for item in stats]))
+            denominator = float(np.mean([item[1] for item in stats]))
+            self.gain_numerator[group] += update_weight * numerator
+            self.gain_denominator[group] += update_weight * denominator
 
     def transform(
         self,

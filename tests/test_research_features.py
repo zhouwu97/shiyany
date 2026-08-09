@@ -43,3 +43,34 @@ def test_research_feature_flags_add_causal_time_price_and_core_dynamic_fields() 
     assert "feat_dynamic_generator_1_lag_1" in features
     assert "feat_dynamic_generator_use_blast_furnace_gas_mean_4" in features
     assert "feat_dynamic_unrelated_measurement_lag_1" not in features
+
+
+def test_ramp_and_relation_features_are_causal_and_frozen_by_config() -> None:
+    index = pd.date_range("2025-01-01", periods=120, freq="15min")
+    frame = pd.DataFrame(
+        {
+            "generator_1": 100.0 + np.sin(np.arange(len(index)) / 4.0),
+            "generator_all": 220.0 + np.sin(np.arange(len(index)) / 5.0),
+            "generator_use_blast_furnace_gas": 500_000.0 + np.arange(len(index)),
+            "blast_furnace_gas_holder_2": 30_000.0 + np.arange(len(index)),
+        },
+        index=index,
+    )
+    config = FeatureConfig(
+        horizons=(1, 2),
+        rolling_windows=(4, 8),
+        enable_ramp_features=True,
+        relation_features=("generator_1|1|1",),
+    )
+
+    baseline = build_causal_features(frame, config)
+    changed = frame.copy()
+    changed.iloc[-1, :] = -999_999.0
+    perturbed = build_causal_features(changed, config)
+
+    assert "feat_generator_1_ramp_up_run_length" in baseline
+    assert "feat_generator_1_acceleration" in baseline
+    assert "feat_relation_generator_1_lag_1_h1" in baseline
+    pd.testing.assert_series_equal(
+        baseline.loc[index[-2]], perturbed.loc[index[-2]], check_names=False
+    )

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import joblib
 
-from gas_forecast.config import ForecastConfig
+from gas_forecast.config import ForecastConfig, forecast_config_from_dict
 from gas_forecast.data import align_tables
 from gas_forecast.experiments import finalize_run, new_run_dir, write_json
 from gas_forecast.features import build_causal_features, load_price_schedule
@@ -19,6 +19,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="执行多起点未来扰动审计")
     parser.add_argument("--data-dir", type=Path, required=True)
     parser.add_argument("--model", type=Path)
+    parser.add_argument("--config", type=Path, help="冻结配置 JSON；未提供时使用模型配置或默认配置")
     parser.add_argument("--origins", type=int, default=50)
     parser.add_argument("--jobs", type=int, default=8)
     parser.add_argument("--run-dir", type=Path)
@@ -26,22 +27,40 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _resolve_data_dir(path: Path) -> Path:
+    if (path / "Pre_gas.csv").exists():
+        return path
+    matches = sorted(
+        child for child in path.iterdir() if child.is_dir() and (child / "Pre_gas.csv").exists()
+    )
+    if len(matches) != 1:
+        raise FileNotFoundError(f"无法解析官方数据目录: {path}")
+    return matches[0]
+
+
 def main() -> None:
     args = parse_args()
     run_dir = args.run_dir or new_run_dir("results/raw/runs", "leakage_audit")
     output = args.output or run_dir / "report.json"
     config = ForecastConfig()
-    dataset = align_tables(args.data_dir, config.feature.frequency)
-    prices = sorted(args.data_dir.glob("*price*.xlsx"))
+    model = None
+    if args.model:
+        model = joblib.load(args.model)
+        if hasattr(model, "config"):
+            config = model.config
+    if args.config:
+        payload = json.loads(args.config.read_text(encoding="utf-8"))
+        config = forecast_config_from_dict(payload)
+    data_dir = _resolve_data_dir(args.data_dir)
+    dataset = align_tables(data_dir, config.feature.frequency)
+    prices = sorted(data_dir.glob("*price*.xlsx"))
     price = load_price_schedule(prices[0]) if prices else None
 
     def builder(frame):
         return build_causal_features(frame, config.feature, price)
 
     predictor = None
-    if args.model:
-        model = joblib.load(args.model)
-
+    if model is not None:
         def predictor(features, current):
             return model.predict(features, current.loc[:, list(model.config.targets)])
     result = audit_future_perturbations(

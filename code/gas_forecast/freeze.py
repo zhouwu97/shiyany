@@ -13,7 +13,8 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from gas_forecast.submission import validate_submission_frame
+from gas_forecast.submission import SUBMISSION_MEMBERS, validate_submission_archive, validate_submission_frame
+from gas_forecast.submission_quality import COMPETITION_QUALITY_POLICY
 
 
 def sha256_file(path: str | Path) -> str:
@@ -50,6 +51,7 @@ def git_is_clean(repo: str | Path = ".") -> bool:
 
 def build_freeze_manifest(
     model_path: str | Path,
+    input_path: str | Path,
     result_path: str | Path,
     archive_path: str | Path,
     selection_path: str | Path,
@@ -58,6 +60,7 @@ def build_freeze_manifest(
     repo: str | Path = ".",
 ) -> dict[str, object]:
     model_path = Path(model_path)
+    input_path = Path(input_path)
     result_path = Path(result_path)
     archive_path = Path(archive_path)
     selection_path = Path(selection_path)
@@ -65,10 +68,15 @@ def build_freeze_manifest(
 
     result = pd.read_csv(result_path)
     validation = validate_submission_frame(result)
+    validate_submission_archive(
+        archive_path,
+        expected_input_path=input_path,
+        expected_result_path=result_path,
+        quality_policy=COMPETITION_QUALITY_POLICY,
+    )
     with zipfile.ZipFile(archive_path) as archive:
-        if archive.namelist() != ["result.csv"]:
-            raise ValueError("提交 ZIP 必须且只能包含 result.csv")
-        archived_bytes = archive.read("result.csv")
+        archived_input_bytes = archive.read("input.csv")
+        archived_bytes = archive.read("s_result.csv")
     archived = pd.read_csv(io.BytesIO(archived_bytes))
     validate_submission_frame(archived)
     if list(result.columns) != list(archived.columns):
@@ -91,14 +99,16 @@ def build_freeze_manifest(
         "git_clean": git_is_clean(repo),
         "model_version": model.version,
         "model_sha256": sha256_file(model_path),
+        "input_sha256": sha256_file(input_path),
         "result_sha256": sha256_file(result_path),
         "zip_sha256": sha256_file(archive_path),
+        "zip_input_sha256": hashlib.sha256(archived_input_bytes).hexdigest(),
         "zip_result_sha256": hashlib.sha256(archived_bytes).hexdigest(),
         "selection_sha256": sha256_file(selection_path),
         "requirements_lock_sha256": sha256_file(lock_path),
         "rows": validation["rows"],
         "prediction_columns": validation["prediction_columns"],
-        "archive_members": ["result.csv"],
+        "archive_members": list(SUBMISSION_MEMBERS),
     }
 
 
@@ -109,8 +119,10 @@ def compare_reproductions(
     keys = (
         "model_version",
         "model_sha256",
+        "input_sha256",
         "result_sha256",
         "zip_sha256",
+        "zip_input_sha256",
         "zip_result_sha256",
         "selection_sha256",
         "requirements_lock_sha256",

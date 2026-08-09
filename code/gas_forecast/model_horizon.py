@@ -61,7 +61,7 @@ class HorizonSpecificRidgeForecaster:
         """仅在明确要求时截取固定近期窗口。"""
 
         mode = self.config.model.ridge_recency_mode
-        if mode not in {"all", "hard", "exp"}:
+        if mode not in {"all", "hard", "exp", "grouped_exp"}:
             raise ValueError(f"不支持的 Ridge 时间漂移模式: {mode}")
         if mode != "hard":
             return x, y, anchor
@@ -74,15 +74,32 @@ class HorizonSpecificRidgeForecaster:
         return x.loc[recent], y.loc[recent], anchor.loc[recent]
 
     def _sample_weight(
-        self, index: pd.DatetimeIndex, future_absolute: np.ndarray
+        self,
+        index: pd.DatetimeIndex,
+        future_absolute: np.ndarray,
+        *,
+        target: str | None = None,
+        horizon: int | None = None,
     ) -> np.ndarray:
         """组合指数时间衰减和未来绝对量权重，并归一化为均值一。"""
 
         weights = np.ones(len(index), dtype=float)
-        if self.config.model.ridge_recency_mode == "exp":
-            half_life = self.config.model.ridge_half_life_days
+        if self.config.model.ridge_recency_mode in {"exp", "grouped_exp"}:
+            if self.config.model.ridge_recency_mode == "grouped_exp":
+                if target != "generator_1" or horizon is None:
+                    half_life = self.config.model.ridge_half_life_days
+                else:
+                    split = len(self.config.feature.horizons) // 2
+                    position = self.config.feature.horizons.index(horizon)
+                    half_life = (
+                        self.config.model.ridge_short_half_life_days
+                        if position < split
+                        else self.config.model.ridge_long_half_life_days
+                    )
+            else:
+                half_life = self.config.model.ridge_half_life_days
             if half_life is None or half_life <= 0:
-                raise ValueError("exp recency 需要正数 ridge_half_life_days")
+                raise ValueError("指数 recency 需要正数半衰期配置")
             age = (index.max() - index).total_seconds() / 86_400.0
             weights *= np.exp(-np.log(2.0) * np.asarray(age, dtype=float) / half_life)
 
@@ -158,7 +175,10 @@ class HorizonSpecificRidgeForecaster:
                 alpha = self._alpha_for(target, horizon)
                 future_absolute = anchor.to_numpy(dtype=float) + y[column].to_numpy(dtype=float)
                 development_weight = self._sample_weight(
-                    development_x.index, future_absolute[:development_end]
+                    development_x.index,
+                    future_absolute[:development_end],
+                    target=target,
+                    horizon=horizon,
                 )
                 probe, probe_step = self._make_pipeline(alpha)
                 self._fit_pipeline(
@@ -183,7 +203,12 @@ class HorizonSpecificRidgeForecaster:
                     model_step,
                     x,
                     y[column],
-                    self._sample_weight(x.index, future_absolute),
+                    self._sample_weight(
+                        x.index,
+                        future_absolute,
+                        target=target,
+                        horizon=horizon,
+                    ),
                 )
                 models.append(model)
                 alphas.append(alpha)

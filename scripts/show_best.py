@@ -21,7 +21,11 @@ def main() -> None:
     print(f"离线 pooled MAPE：{mape:.4%}")
     print(f"离线预测得分：{100 * (1 - mape):.4f}")
     print(f"来源运行：{summary.get('source_run', 'unknown')}")
-    submission = Path("提交这个/teamname_gas_predict_prelim.zip")
+    delivery_summary = Path("提交这个/summary.json")
+    submission = Path("提交这个/咕咕嘎嘎_gas_predict_prelim.zip")
+    if delivery_summary.exists():
+        delivery = json.loads(delivery_summary.read_text(encoding="utf-8"))
+        submission = Path(str(delivery.get("submission", submission)))
     if not submission.exists():
         submission = args.best_dir / "submission.zip"
     print(f"唯一提交文件：{submission.resolve()}")

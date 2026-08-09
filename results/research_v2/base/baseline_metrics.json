@@ -1,0 +1,16 @@
+{
+  "pooled_mape": 0.05297932227793573,
+  "by_target": {
+    "generator_1": 0.061303276235450246,
+    "generator_all": 0.044655368320421225
+  },
+  "blind_mape": 0.057908750318648734,
+  "rows": 62858,
+  "tolerance": 1e-08,
+  "branch_source_rows": 31429,
+  "branch_fallback_to_c0_rows": 31429,
+  "branch_source_by_target": {
+    "generator_1": 31429,
+    "generator_all": 0
+  }
+}

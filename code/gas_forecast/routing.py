@@ -104,6 +104,7 @@ def apply_route(
     route: dict[str, object],
     *,
     output_column: str = "routed_pred",
+    post_route_reconciliation: bool = True,
 ) -> pd.DataFrame:
     """将冻结路由应用到逐行候选预测。"""
 
@@ -119,6 +120,49 @@ def apply_route(
         prediction.append(float(getattr(row, column)))
     output["selected_model"] = selected
     output[output_column] = prediction
+    return (
+        reconcile_post_route(output, prediction_column=output_column)
+        if post_route_reconciliation
+        else output
+    )
+
+
+def reconcile_post_route(
+    rows: pd.DataFrame,
+    *,
+    prediction_column: str = "routed_pred",
+    max_generator_rest: float = 240.0,
+) -> pd.DataFrame:
+    """对不同目标路由后的长表执行低自由度结构协调。
+
+    目标路由可能从不同模型拼出两个目标；因此单模型内部的约束不能保证
+    最终组合仍满足 ``generator_all >= generator_1``。这里使用与生产
+    ``RoutedLegacyForecaster`` 相同的确定性投影，并保留原始行顺序。
+    """
+
+    required = {"fold", "origin_time", "target", "horizon", prediction_column}
+    missing = sorted(required.difference(rows.columns))
+    if missing:
+        raise ValueError(f"路由后结构协调缺少字段: {missing}")
+    output = rows.copy()
+    keys = ["fold", "origin_time", "horizon"]
+    gen1 = output.loc[output["target"].eq("generator_1"), keys + [prediction_column]]
+    total_mask = output["target"].eq("generator_all")
+    if gen1.empty or not total_mask.any():
+        return output
+    gen1_indexed = gen1.set_index(keys)[prediction_column]
+    total = output.loc[total_mask, keys]
+    total_index = pd.MultiIndex.from_frame(total)
+    gen1_values = gen1_indexed.reindex(total_index).to_numpy(dtype=float)
+    total_values = output.loc[total_mask, prediction_column].to_numpy(dtype=float)
+    valid = np.isfinite(gen1_values) & np.isfinite(total_values)
+    reconciled = total_values.copy()
+    reconciled[valid] = np.maximum(total_values[valid], gen1_values[valid])
+    if max_generator_rest is not None:
+        reconciled[valid] = np.minimum(
+            reconciled[valid], gen1_values[valid] + float(max_generator_rest)
+        )
+    output.loc[total_mask, prediction_column] = reconciled
     return output
 
 
@@ -128,6 +172,7 @@ def leave_one_fold_out_route(
     *,
     config: RoutingConfig | None = None,
     score_spec: ScoreSpec | None = None,
+    post_route_reconciliation: bool = True,
 ) -> tuple[pd.DataFrame, dict[str, object]]:
     """逐折在其余外层折学习路由，形成无偏路由 OOF。"""
 
@@ -144,7 +189,13 @@ def leave_one_fold_out_route(
         route = learn_hierarchical_route(
             train, candidate_columns, config=config, score_spec=spec
         )
-        parts.append(apply_route(validation, route))
+        parts.append(
+            apply_route(
+                validation,
+                route,
+                post_route_reconciliation=post_route_reconciliation,
+            )
+        )
         fold_routes[held_out] = route
     routed = pd.concat(parts, ignore_index=True).sort_values(
         ["origin_time", "target", "horizon", "fold"], kind="stable"
@@ -152,8 +203,16 @@ def leave_one_fold_out_route(
     final_route = learn_hierarchical_route(
         rows, candidate_columns, config=config, score_spec=spec
     )
+    final_route["post_route_reconciliation"] = {
+        "enabled": bool(post_route_reconciliation),
+        "max_generator_rest": 240.0,
+    }
     return routed.reset_index(drop=True), {
         "unbiased_oof": score_oof_long(routed, "routed_pred", spec=spec),
         "fold_routes": fold_routes,
         "final_route": final_route,
+        "post_route_reconciliation": {
+            "enabled": bool(post_route_reconciliation),
+            "max_generator_rest": 240.0,
+        },
     }

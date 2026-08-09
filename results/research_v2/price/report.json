@@ -1,0 +1,1761 @@
+{
+  "atlas": {
+    "scope": "development_only",
+    "rows": 58368,
+    "switch_coverage": 0.4583333333333333,
+    "mape_switch": 0.054705198291187876,
+    "mape_non_switch": 0.05081890454611252,
+    "bias_switch": 0.0004278646285900692,
+    "bias_before_switch": -0.0015939297331410373,
+    "bias_after_switch": 0.004103784133486678,
+    "by_switch_category": [
+      {
+        "switch_category": "immediate_switch",
+        "rows": 3648,
+        "mape": 0.0560554731088117,
+        "bias": 0.007355325702482531
+      },
+      {
+        "switch_category": "no_switch",
+        "rows": 31616,
+        "mape": 0.05081890454611253,
+        "bias": 0.002279964779845763
+      },
+      {
+        "switch_category": "switch_in_1_step",
+        "rows": 3648,
+        "mape": 0.05618761718260784,
+        "bias": 0.0046406352701030915
+      },
+      {
+        "switch_category": "switch_in_2_steps",
+        "rows": 3648,
+        "mape": 0.05527098203100203,
+        "bias": -0.004646001375146686
+      },
+      {
+        "switch_category": "switch_in_3_4_steps",
+        "rows": 6688,
+        "mape": 0.05458633681923949,
+        "bias": 0.0016709709457644354
+      },
+      {
+        "switch_category": "switch_in_5_8_steps",
+        "rows": 9120,
+        "mape": 0.05343297239107352,
+        "bias": -0.0029102929553386234
+      }
+    ],
+    "by_direction": [
+      {
+        "switch_direction": -1,
+        "rows": 14592,
+        "mape": 0.05076631203679107,
+        "bias": 0.007328405630096955
+      },
+      {
+        "switch_direction": 0,
+        "rows": 31616,
+        "mape": 0.05081890454611253,
+        "bias": 0.002279964779845763
+      },
+      {
+        "switch_direction": 1,
+        "rows": 12160,
+        "mape": 0.05943186179646404,
+        "bias": -0.007852784573218193
+      }
+    ],
+    "by_magnitude": [
+      {
+        "price_magnitude_quantile": "Q1",
+        "rows": 26752,
+        "mape": 0.054705198291187876,
+        "bias": 0.0004278646285900694
+      },
+      {
+        "price_magnitude_quantile": "no_switch",
+        "rows": 31616,
+        "mape": 0.05081890454611253,
+        "bias": 0.002279964779845763
+      }
+    ],
+    "by_horizon_relation": [
+      {
+        "horizon_switch_relation": "after_switch",
+        "rows": 12312,
+        "mape": 0.06704222264916858,
+        "bias": 0.0041037841334866775
+      },
+      {
+        "horizon_switch_relation": "at_switch",
+        "rows": 3344,
+        "mape": 0.053496880830991696,
+        "bias": -0.006397521348239682
+      },
+      {
+        "horizon_switch_relation": "before_switch",
+        "rows": 11096,
+        "mape": 0.04138032173129581,
+        "bias": -0.001593929733141037
+      },
+      {
+        "horizon_switch_relation": "no_switch",
+        "rows": 31616,
+        "mape": 0.05081890454611253,
+        "bias": 0.002279964779845763
+      }
+    ]
+  },
+  "ranking": [
+    {
+      "candidate": "price_ridge_a025_c05_pred",
+      "config": {
+        "model": "ridge",
+        "alpha": 0.25,
+        "clip_mw": 5.0
+      },
+      "pooled_mape": 0.05293271704777995,
+      "delta_pp": 0.033259453517456294,
+      "fold_wins": 8,
+      "recent5_wins": 4,
+      "max_fold_regression_pp": 0.21420858396075035
+    },
+    {
+      "candidate": "price_huber_a025_c05_pred",
+      "config": {
+        "model": "huber",
+        "alpha": 0.25,
+        "clip_mw": 5.0
+      },
+      "pooled_mape": 0.05293536569950584,
+      "delta_pp": 0.03352431869004524,
+      "fold_wins": 9,
+      "recent5_wins": 3,
+      "max_fold_regression_pp": 0.3880378065030096
+    },
+    {
+      "candidate": "price_gam_a025_c05_pred",
+      "config": {
+        "model": "gam",
+        "alpha": 0.25,
+        "clip_mw": 5.0
+      },
+      "pooled_mape": 0.05345226039073786,
+      "delta_pp": 0.08521378781324723,
+      "fold_wins": 3,
+      "recent5_wins": 1,
+      "max_fold_regression_pp": 0.4491335925153911
+    },
+    {
+      "candidate": "price_ridge_a025_c10_pred",
+      "config": {
+        "model": "ridge",
+        "alpha": 0.25,
+        "clip_mw": 10.0
+      },
+      "pooled_mape": 0.053822275309519045,
+      "delta_pp": 0.12221527969136572,
+      "fold_wins": 5,
+      "recent5_wins": 2,
+      "max_fold_regression_pp": 0.6107556868297642
+    },
+    {
+      "candidate": "price_huber_a025_c10_pred",
+      "config": {
+        "model": "huber",
+        "alpha": 0.25,
+        "clip_mw": 10.0
+      },
+      "pooled_mape": 0.053889251608595895,
+      "delta_pp": 0.12891290959905072,
+      "fold_wins": 7,
+      "recent5_wins": 1,
+      "max_fold_regression_pp": 0.9376512168860138
+    },
+    {
+      "candidate": "price_huber_a050_c05_pred",
+      "config": {
+        "model": "huber",
+        "alpha": 0.5,
+        "clip_mw": 5.0
+      },
+      "pooled_mape": 0.05444374617904491,
+      "delta_pp": 0.18436236664395242,
+      "fold_wins": 4,
+      "recent5_wins": 1,
+      "max_fold_regression_pp": 0.9866568806679438
+    },
+    {
+      "candidate": "price_ridge_a025_c15_pred",
+      "config": {
+        "model": "ridge",
+        "alpha": 0.25,
+        "clip_mw": 15.0
+      },
+      "pooled_mape": 0.05445894694993846,
+      "delta_pp": 0.18588244373330745,
+      "fold_wins": 4,
+      "recent5_wins": 2,
+      "max_fold_regression_pp": 1.0367015147614151
+    },
+    {
+      "candidate": "price_gam_a025_c10_pred",
+      "config": {
+        "model": "gam",
+        "alpha": 0.25,
+        "clip_mw": 10.0
+      },
+      "pooled_mape": 0.05451672594357344,
+      "delta_pp": 0.19166034309680488,
+      "fold_wins": 2,
+      "recent5_wins": 1,
+      "max_fold_regression_pp": 0.840994200950733
+    },
+    {
+      "candidate": "price_ridge_a050_c05_pred",
+      "config": {
+        "model": "ridge",
+        "alpha": 0.5,
+        "clip_mw": 5.0
+      },
+      "pooled_mape": 0.05455348812539141,
+      "delta_pp": 0.1953365612786022,
+      "fold_wins": 3,
+      "recent5_wins": 2,
+      "max_fold_regression_pp": 0.6502633853453343
+    },
+    {
+      "candidate": "price_huber_a025_c15_pred",
+      "config": {
+        "model": "huber",
+        "alpha": 0.25,
+        "clip_mw": 15.0
+      },
+      "pooled_mape": 0.05471398067606896,
+      "delta_pp": 0.21138581634635722,
+      "fold_wins": 7,
+      "recent5_wins": 1,
+      "max_fold_regression_pp": 1.4575697571600932
+    },
+    {
+      "candidate": "price_gam_a025_c15_pred",
+      "config": {
+        "model": "gam",
+        "alpha": 0.25,
+        "clip_mw": 15.0
+      },
+      "pooled_mape": 0.05515075955773989,
+      "delta_pp": 0.2550637045134502,
+      "fold_wins": 2,
+      "recent5_wins": 1,
+      "max_fold_regression_pp": 1.0136167800670406
+    },
+    {
+      "candidate": "price_gam_a050_c05_pred",
+      "config": {
+        "model": "gam",
+        "alpha": 0.5,
+        "clip_mw": 5.0
+      },
+      "pooled_mape": 0.05557196306819131,
+      "delta_pp": 0.29718405555859206,
+      "fold_wins": 2,
+      "recent5_wins": 1,
+      "max_fold_regression_pp": 1.0690455491161932
+    },
+    {
+      "candidate": "price_huber_a075_c05_pred",
+      "config": {
+        "model": "huber",
+        "alpha": 0.75,
+        "clip_mw": 5.0
+      },
+      "pooled_mape": 0.056563163191301294,
+      "delta_pp": 0.3963040678695906,
+      "fold_wins": 0,
+      "recent5_wins": 0,
+      "max_fold_regression_pp": 1.6844383050854992
+    },
+    {
+      "candidate": "price_ridge_a075_c05_pred",
+      "config": {
+        "model": "ridge",
+        "alpha": 0.75,
+        "clip_mw": 5.0
+      },
+      "pooled_mape": 0.05689623625006542,
+      "delta_pp": 0.42961137374600344,
+      "fold_wins": 1,
+      "recent5_wins": 1,
+      "max_fold_regression_pp": 1.1957901853171
+    },
+    {
+      "candidate": "price_huber_a050_c10_pred",
+      "config": {
+        "model": "huber",
+        "alpha": 0.5,
+        "clip_mw": 10.0
+      },
+      "pooled_mape": 0.057138351038858094,
+      "delta_pp": 0.45382285262527067,
+      "fold_wins": 0,
+      "recent5_wins": 0,
+      "max_fold_regression_pp": 2.2867280714200064
+    },
+    {
+      "candidate": "price_ridge_a050_c10_pred",
+      "config": {
+        "model": "ridge",
+        "alpha": 0.5,
+        "clip_mw": 10.0
+      },
+      "pooled_mape": 0.05734411065168068,
+      "delta_pp": 0.474398813907529,
+      "fold_wins": 2,
+      "recent5_wins": 2,
+      "max_fold_regression_pp": 1.6511869414206113
+    },
+    {
+      "candidate": "price_gam_a075_c05_pred",
+      "config": {
+        "model": "gam",
+        "alpha": 0.75,
+        "clip_mw": 5.0
+      },
+      "pooled_mape": 0.058364831238230754,
+      "delta_pp": 0.5764708725625366,
+      "fold_wins": 2,
+      "recent5_wins": 1,
+      "max_fold_regression_pp": 1.763848307387708
+    },
+    {
+      "candidate": "price_gam_a050_c10_pred",
+      "config": {
+        "model": "gam",
+        "alpha": 0.5,
+        "clip_mw": 10.0
+      },
+      "pooled_mape": 0.05877464456242589,
+      "delta_pp": 0.6174522049820503,
+      "fold_wins": 1,
+      "recent5_wins": 1,
+      "max_fold_regression_pp": 1.9819288414528111
+    },
+    {
+      "candidate": "price_huber_a100_c05_pred",
+      "config": {
+        "model": "huber",
+        "alpha": 1.0,
+        "clip_mw": 5.0
+      },
+      "pooled_mape": 0.05906397212847641,
+      "delta_pp": 0.6463849615871021,
+      "fold_wins": 0,
+      "recent5_wins": 0,
+      "max_fold_regression_pp": 2.414201729635085
+    },
+    {
+      "candidate": "price_ridge_a050_c15_pred",
+      "config": {
+        "model": "ridge",
+        "alpha": 0.5,
+        "clip_mw": 15.0
+      },
+      "pooled_mape": 0.05907802802857515,
+      "delta_pp": 0.647790551596976,
+      "fold_wins": 2,
+      "recent5_wins": 2,
+      "max_fold_regression_pp": 2.579476320645101
+    },
+    {
+      "candidate": "price_huber_a050_c15_pred",
+      "config": {
+        "model": "huber",
+        "alpha": 0.5,
+        "clip_mw": 15.0
+      },
+      "pooled_mape": 0.05925160506776138,
+      "delta_pp": 0.6651482555155991,
+      "fold_wins": 1,
+      "recent5_wins": 0,
+      "max_fold_regression_pp": 3.381561206737109
+    },
+    {
+      "candidate": "price_ridge_a100_c05_pred",
+      "config": {
+        "model": "ridge",
+        "alpha": 1.0,
+        "clip_mw": 5.0
+      },
+      "pooled_mape": 0.0596735364331247,
+      "delta_pp": 0.7073413920519314,
+      "fold_wins": 1,
+      "recent5_wins": 1,
+      "max_fold_regression_pp": 1.7844212609274546
+    },
+    {
+      "candidate": "price_gam_a050_c15_pred",
+      "config": {
+        "model": "gam",
+        "alpha": 0.5,
+        "clip_mw": 15.0
+      },
+      "pooled_mape": 0.06056095636285674,
+      "delta_pp": 0.7960833850251349,
+      "fold_wins": 1,
+      "recent5_wins": 1,
+      "max_fold_regression_pp": 2.350781640840524
+    },
+    {
+      "candidate": "price_huber_a075_c10_pred",
+      "config": {
+        "model": "huber",
+        "alpha": 0.75,
+        "clip_mw": 10.0
+      },
+      "pooled_mape": 0.06127882927157571,
+      "delta_pp": 0.8678706758970325,
+      "fold_wins": 0,
+      "recent5_wins": 0,
+      "max_fold_regression_pp": 3.70377481397868
+    },
+    {
+      "candidate": "price_gam_a100_c05_pred",
+      "config": {
+        "model": "gam",
+        "alpha": 1.0,
+        "clip_mw": 5.0
+      },
+      "pooled_mape": 0.061551745196067736,
+      "delta_pp": 0.8951622683462348,
+      "fold_wins": 1,
+      "recent5_wins": 1,
+      "max_fold_regression_pp": 2.4805725560365257
+    },
+    {
+      "candidate": "price_ridge_a075_c10_pred",
+      "config": {
+        "model": "ridge",
+        "alpha": 0.75,
+        "clip_mw": 10.0
+      },
+      "pooled_mape": 0.061873804434220275,
+      "delta_pp": 0.9273681921614887,
+      "fold_wins": 1,
+      "recent5_wins": 1,
+      "max_fold_regression_pp": 2.80265890911118
+    },
+    {
+      "candidate": "price_gam_a075_c10_pred",
+      "config": {
+        "model": "gam",
+        "alpha": 0.75,
+        "clip_mw": 10.0
+      },
+      "pooled_mape": 0.06409198586277148,
+      "delta_pp": 1.1491863350166096,
+      "fold_wins": 1,
+      "recent5_wins": 1,
+      "max_fold_regression_pp": 3.161668734373116
+    },
+    {
+      "candidate": "price_ridge_a075_c15_pred",
+      "config": {
+        "model": "ridge",
+        "alpha": 0.75,
+        "clip_mw": 15.0
+      },
+      "pooled_mape": 0.06483096924524383,
+      "delta_pp": 1.2230846732638438,
+      "fold_wins": 1,
+      "recent5_wins": 1,
+      "max_fold_regression_pp": 4.231266865355093
+    },
+    {
+      "candidate": "price_huber_a075_c15_pred",
+      "config": {
+        "model": "huber",
+        "alpha": 0.75,
+        "clip_mw": 15.0
+      },
+      "pooled_mape": 0.0648447533113988,
+      "delta_pp": 1.2244630798793412,
+      "fold_wins": 0,
+      "recent5_wins": 0,
+      "max_fold_regression_pp": 5.418776243390473
+    },
+    {
+      "candidate": "price_huber_a100_c10_pred",
+      "config": {
+        "model": "huber",
+        "alpha": 1.0,
+        "clip_mw": 10.0
+      },
+      "pooled_mape": 0.0659739629567899,
+      "delta_pp": 1.3373840444184506,
+      "fold_wins": 0,
+      "recent5_wins": 0,
+      "max_fold_regression_pp": 5.163796013032493
+    },
+    {
+      "candidate": "price_ridge_a100_c10_pred",
+      "config": {
+        "model": "ridge",
+        "alpha": 1.0,
+        "clip_mw": 10.0
+      },
+      "pooled_mape": 0.06703213856992049,
+      "delta_pp": 1.4432016057315102,
+      "fold_wins": 0,
+      "recent5_wins": 0,
+      "max_fold_regression_pp": 4.006031647701007
+    },
+    {
+      "candidate": "price_gam_a075_c15_pred",
+      "config": {
+        "model": "gam",
+        "alpha": 0.75,
+        "clip_mw": 15.0
+      },
+      "pooled_mape": 0.06724688494144258,
+      "delta_pp": 1.4646762428837197,
+      "fold_wins": 0,
+      "recent5_wins": 0,
+      "max_fold_regression_pp": 3.720215603014658
+    },
+    {
+      "candidate": "price_gam_a100_c10_pred",
+      "config": {
+        "model": "gam",
+        "alpha": 1.0,
+        "clip_mw": 10.0
+      },
+      "pooled_mape": 0.07014074483705576,
+      "delta_pp": 1.7540622324450375,
+      "fold_wins": 0,
+      "recent5_wins": 0,
+      "max_fold_regression_pp": 4.359836744177478
+    },
+    {
+      "candidate": "price_huber_a100_c15_pred",
+      "config": {
+        "model": "huber",
+        "alpha": 1.0,
+        "clip_mw": 15.0
+      },
+      "pooled_mape": 0.07106277361449374,
+      "delta_pp": 1.8462651101888357,
+      "fold_wins": 0,
+      "recent5_wins": 0,
+      "max_fold_regression_pp": 7.5292310068692485
+    },
+    {
+      "candidate": "price_ridge_a100_c15_pred",
+      "config": {
+        "model": "ridge",
+        "alpha": 1.0,
+        "clip_mw": 15.0
+      },
+      "pooled_mape": 0.07134021277590885,
+      "delta_pp": 1.8740090263303464,
+      "fold_wins": 0,
+      "recent5_wins": 0,
+      "max_fold_regression_pp": 5.995507996838183
+    },
+    {
+      "candidate": "price_gam_a100_c15_pred",
+      "config": {
+        "model": "gam",
+        "alpha": 1.0,
+        "clip_mw": 15.0
+      },
+      "pooled_mape": 0.07474462776013371,
+      "delta_pp": 2.2144505247528325,
+      "fold_wins": 0,
+      "recent5_wins": 0,
+      "max_fold_regression_pp": 5.104867738765143
+    }
+  ],
+  "best_candidate": "price_ridge_a025_c05_pred",
+  "best_evaluation": {
+    "scope": "development_only",
+    "candidate": {
+      "score_spec": {
+        "epsilon": 1e-06,
+        "target_aggregation": "pooled_cells",
+        "horizon_aggregation": "pooled_cells",
+        "missing_policy": "drop_pairwise"
+      },
+      "rows": 58368,
+      "pooled_mape": 0.05293271704777995,
+      "equal_target_mape": 0.05293271704777995,
+      "equal_target_horizon_mape": 0.05293271704777995,
+      "legacy_fold_mean_mape": 0.05293271704777995,
+      "by_target": {
+        "generator_1": 0.062078056198739136,
+        "generator_all": 0.04378737789682076
+      },
+      "by_horizon": {
+        "t+15": 0.023863141246173586,
+        "t+30": 0.034072767221134156,
+        "t+45": 0.04240950924907577,
+        "t+60": 0.051049032765064964,
+        "t+75": 0.058578341693665756,
+        "t+90": 0.06543543811264592,
+        "t+105": 0.07148018730641847,
+        "t+120": 0.07657331878806097
+      },
+      "by_fold": {
+        "dev_01": 0.046759195053712434,
+        "dev_02": 0.050657285573903775,
+        "dev_03": 0.06574542302280202,
+        "dev_04": 0.07366637843081476,
+        "dev_05": 0.05220955958884849,
+        "dev_06": 0.036358220579997304,
+        "dev_07": 0.056839611755660956,
+        "dev_08": 0.07042166306173535,
+        "dev_09": 0.05607135135778462,
+        "dev_10": 0.06016702689156587,
+        "dev_11": 0.0718402832473714,
+        "dev_12": 0.07456138472380446,
+        "dev_13": 0.0318124106856587,
+        "dev_14": 0.027038816082683353,
+        "dev_15": 0.03900221135967277,
+        "dev_16": 0.04196240880519019,
+        "dev_17": 0.06007669464459134,
+        "dev_18": 0.04240316661501011,
+        "dev_19": 0.04812853242701116
+      },
+      "by_day": {
+        "2025-03-20": 0.05838954774921154,
+        "2025-03-21": 0.03512884235821332,
+        "2025-03-22": 0.06391503314001232,
+        "2025-03-23": 0.037399538007795226,
+        "2025-03-24": 0.053747896211116614,
+        "2025-03-25": 0.07774294983448743,
+        "2025-03-26": 0.10113429658843572,
+        "2025-03-27": 0.0461984602731938,
+        "2025-03-28": 0.07052463165975731,
+        "2025-03-29": 0.03389448751793968,
+        "2025-03-30": 0.019799010710295425,
+        "2025-03-31": 0.052917430449699175,
+        "2025-04-01": 0.06120961699181821,
+        "2025-04-02": 0.0524696065195037,
+        "2025-04-03": 0.0841725373010032,
+        "2025-04-04": 0.05667078882246749,
+        "2025-04-05": 0.038838471727491934,
+        "2025-04-06": 0.0733042309880773,
+        "2025-04-07": 0.0807777051665058,
+        "2025-04-08": 0.03955634861662595,
+        "2025-04-09": 0.07101374426765324,
+        "2025-04-10": 0.07266682222708956,
+        "2025-04-11": 0.07610249586667485,
+        "2025-04-12": 0.07302027358093405,
+        "2025-04-13": 0.028516884058813183,
+        "2025-04-14": 0.03510793731250422,
+        "2025-04-15": 0.021954517247886787,
+        "2025-04-16": 0.03212311491747992,
+        "2025-04-17": 0.03996867254543928,
+        "2025-04-18": 0.038035750173906265,
+        "2025-04-19": 0.04221581242774716,
+        "2025-04-20": 0.04170900518263323,
+        "2025-04-21": 0.06152558593577537,
+        "2025-04-22": 0.05862780335340731,
+        "2025-04-23": 0.035594296537365976,
+        "2025-04-24": 0.049212036692654254,
+        "2025-04-25": 0.06001165269945879,
+        "2025-04-26": 0.03624541215456354
+      },
+      "origin_error_p90": 0.11173228578168096,
+      "origin_error_p95": 0.1395613162714113
+    },
+    "baseline": {
+      "score_spec": {
+        "epsilon": 1e-06,
+        "target_aggregation": "pooled_cells",
+        "horizon_aggregation": "pooled_cells",
+        "missing_policy": "drop_pairwise"
+      },
+      "rows": 58368,
+      "pooled_mape": 0.05260012251260539,
+      "equal_target_mape": 0.052600122512605395,
+      "equal_target_horizon_mape": 0.052600122512605395,
+      "legacy_fold_mean_mape": 0.052600122512605395,
+      "by_target": {
+        "generator_1": 0.06143342768217783,
+        "generator_all": 0.04376681734303296
+      },
+      "by_horizon": {
+        "t+15": 0.02266814272575761,
+        "t+30": 0.03329680039345917,
+        "t+45": 0.04189874341179004,
+        "t+60": 0.0506778834816962,
+        "t+75": 0.05841202286845455,
+        "t+90": 0.06549093868189611,
+        "t+105": 0.07160713033489194,
+        "t+120": 0.07674931820289756
+      },
+      "by_fold": {
+        "dev_01": 0.046759195053712434,
+        "dev_02": 0.049908716273151105,
+        "dev_03": 0.06462060843961932,
+        "dev_04": 0.07156821517942093,
+        "dev_05": 0.05211404218434201,
+        "dev_06": 0.0342161347403898,
+        "dev_07": 0.05614596932291634,
+        "dev_08": 0.0712574869324933,
+        "dev_09": 0.05539973867212444,
+        "dev_10": 0.06039951074000945,
+        "dev_11": 0.07179623267784299,
+        "dev_12": 0.07498495812831989,
+        "dev_13": 0.03113154284703967,
+        "dev_14": 0.02726024592266341,
+        "dev_15": 0.03814370365815267,
+        "dev_16": 0.04215326249002382,
+        "dev_17": 0.06055789891490707,
+        "dev_18": 0.04275617454945883,
+        "dev_19": 0.04822869101291505
+      },
+      "by_day": {
+        "2025-03-20": 0.05838954774921154,
+        "2025-03-21": 0.03512884235821332,
+        "2025-03-22": 0.061139887471746,
+        "2025-03-23": 0.038677545074556216,
+        "2025-03-24": 0.05259807145267668,
+        "2025-03-25": 0.07664314542656198,
+        "2025-03-26": 0.09992093181994621,
+        "2025-03-27": 0.04321549853889562,
+        "2025-03-28": 0.07000296027399701,
+        "2025-03-29": 0.034225124094687025,
+        "2025-03-30": 0.016702818499577412,
+        "2025-03-31": 0.05172945098120219,
+        "2025-04-01": 0.06034407643462252,
+        "2025-04-02": 0.051947862211210165,
+        "2025-04-03": 0.08535897523994491,
+        "2025-04-04": 0.05715599862504169,
+        "2025-04-05": 0.037335385598794395,
+        "2025-04-06": 0.0734640917454545,
+        "2025-04-07": 0.08093322268490236,
+        "2025-04-08": 0.03986579879511654,
+        "2025-04-09": 0.07147352752193697,
+        "2025-04-10": 0.07211893783374901,
+        "2025-04-11": 0.07639895542136749,
+        "2025-04-12": 0.07357096083527229,
+        "2025-04-13": 0.028490611193345977,
+        "2025-04-14": 0.03377247450073336,
+        "2025-04-15": 0.022551257184188805,
+        "2025-04-16": 0.03196923466113801,
+        "2025-04-17": 0.03869380426378401,
+        "2025-04-18": 0.037593603052521345,
+        "2025-04-19": 0.04300060669596889,
+        "2025-04-20": 0.04130591828407873,
+        "2025-04-21": 0.06172251205772825,
+        "2025-04-22": 0.059393285772085885,
+        "2025-04-23": 0.03599143910161648,
+        "2025-04-24": 0.04952090999730119,
+        "2025-04-25": 0.06037855780213835,
+        "2025-04-26": 0.036078824223691755
+      },
+      "origin_error_p90": 0.11242289765189833,
+      "origin_error_p95": 0.14045194201298739
+    },
+    "delta_pp": 0.033259453517456294,
+    "fold_wins": 8,
+    "recent5_wins": 4,
+    "max_fold_regression_pp": 0.21420858396075035,
+    "fold_delta_pp": {
+      "dev_01": 0.0,
+      "dev_02": 0.07485693007526703,
+      "dev_03": 0.11248145831826983,
+      "dev_04": 0.20981632513938364,
+      "dev_05": 0.009551740450648022,
+      "dev_06": 0.21420858396075035,
+      "dev_07": 0.06936424327446122,
+      "dev_08": -0.08358238707579513,
+      "dev_09": 0.06716126856601765,
+      "dev_10": -0.023248384844358483,
+      "dev_11": 0.004405056952841435,
+      "dev_12": -0.04235734045154316,
+      "dev_13": 0.06808678386190335,
+      "dev_14": -0.02214298399800564,
+      "dev_15": 0.08585077015201004,
+      "dev_16": -0.019085368483362508,
+      "dev_17": -0.048120427031573404,
+      "dev_18": -0.035300793444871525,
+      "dev_19": -0.010015858590389087
+    }
+  },
+  "correction_distribution_mw": {
+    "p50": 1.25,
+    "p90": 1.25,
+    "p95": 1.25,
+    "p99": 1.25,
+    "max": 1.2500000000000284
+  },
+  "models": {
+    "ridge": {
+      "model": "ridge",
+      "feature_columns": [
+        "current_value",
+        "c0_pred",
+        "feat_generator_1_clean",
+        "feat_generator_1_is_outlier",
+        "feat_generator_1_outlier_score",
+        "feat_generator_1_steps_since_outlier",
+        "feat_generator_1_local_median_deviation",
+        "feat_generator_1_freeze_length",
+        "feat_generator_1_near_freeze_length",
+        "feat_generator_1_freeze_started",
+        "feat_generator_1_freeze_ended",
+        "feat_generator_1_post_freeze_jump",
+        "feat_generator_gas_total",
+        "feat_generator_1_efficiency",
+        "feat_generator_rest_efficiency",
+        "feat_generator_1_lag_1",
+        "feat_generator_1_lag_2",
+        "feat_generator_1_lag_4",
+        "feat_generator_1_lag_8",
+        "feat_generator_1_lag_16",
+        "feat_generator_1_lag_32",
+        "feat_generator_1_lag_96",
+        "feat_generator_1_lag_192",
+        "feat_generator_1_lag_288",
+        "feat_generator_1_lag_672",
+        "feat_generator_1_diff_1",
+        "feat_generator_1_diff_2",
+        "feat_generator_1_diff_4",
+        "feat_generator_1_diff_8",
+        "feat_generator_1_diff_16",
+        "feat_generator_1_mean_4",
+        "feat_generator_1_std_4",
+        "feat_generator_1_min_4",
+        "feat_generator_1_max_4",
+        "feat_generator_1_vs_mean_4",
+        "feat_generator_1_mean_8",
+        "feat_generator_1_std_8",
+        "feat_generator_1_min_8",
+        "feat_generator_1_max_8",
+        "feat_generator_1_vs_mean_8",
+        "feat_generator_1_mean_16",
+        "feat_generator_1_std_16",
+        "feat_generator_1_min_16",
+        "feat_generator_1_max_16",
+        "feat_generator_1_vs_mean_16",
+        "feat_generator_1_mean_32",
+        "feat_generator_1_std_32",
+        "feat_generator_1_min_32",
+        "feat_generator_1_max_32",
+        "feat_generator_1_vs_mean_32",
+        "feat_generator_1_mean_96",
+        "feat_generator_1_std_96",
+        "feat_generator_1_min_96",
+        "feat_generator_1_max_96",
+        "feat_generator_1_vs_mean_96",
+        "feat_generator_1_slope_4",
+        "feat_generator_1_slope_8",
+        "feat_generator_1_same_slot_median_14d",
+        "feat_generator_1_same_slot_mean_3d",
+        "feat_generator_1_vs_same_slot_mean_3d",
+        "feat_generator_1_same_slot_mean_7d",
+        "feat_generator_1_vs_same_slot_mean_7d",
+        "feat_generator_1_same_slot_mean_14d",
+        "feat_generator_1_vs_same_slot_mean_14d",
+        "feat_generator_rest_lag_1",
+        "feat_generator_rest_lag_2",
+        "feat_generator_rest_lag_4",
+        "feat_generator_rest_lag_8",
+        "feat_generator_rest_lag_16",
+        "feat_generator_rest_lag_32",
+        "feat_generator_rest_lag_96",
+        "feat_generator_rest_lag_192",
+        "feat_generator_rest_lag_288",
+        "feat_generator_rest_lag_672",
+        "feat_generator_rest_diff_1",
+        "feat_generator_rest_diff_2",
+        "feat_generator_rest_diff_4",
+        "feat_generator_rest_diff_8",
+        "feat_generator_rest_diff_16",
+        "feat_generator_rest_mean_4",
+        "feat_generator_rest_std_4",
+        "feat_generator_rest_min_4",
+        "feat_generator_rest_max_4",
+        "feat_generator_rest_vs_mean_4",
+        "feat_generator_rest_mean_8",
+        "feat_generator_rest_std_8",
+        "feat_generator_rest_min_8",
+        "feat_generator_rest_max_8",
+        "feat_generator_rest_vs_mean_8",
+        "feat_generator_rest_mean_16",
+        "feat_generator_rest_std_16",
+        "feat_generator_rest_min_16",
+        "feat_generator_rest_max_16",
+        "feat_generator_rest_vs_mean_16",
+        "feat_generator_rest_mean_32",
+        "feat_generator_rest_std_32",
+        "feat_generator_rest_min_32",
+        "feat_generator_rest_max_32",
+        "feat_generator_rest_vs_mean_32",
+        "feat_generator_rest_mean_96",
+        "feat_generator_rest_std_96",
+        "feat_generator_rest_min_96",
+        "feat_generator_rest_max_96",
+        "feat_generator_rest_vs_mean_96",
+        "feat_generator_rest_slope_4",
+        "feat_generator_rest_slope_8",
+        "feat_generator_rest_same_slot_median_14d",
+        "feat_generator_rest_same_slot_mean_3d",
+        "feat_generator_rest_vs_same_slot_mean_3d",
+        "feat_generator_rest_same_slot_mean_7d",
+        "feat_generator_rest_vs_same_slot_mean_7d",
+        "feat_generator_rest_same_slot_mean_14d",
+        "feat_generator_rest_vs_same_slot_mean_14d",
+        "feat_generator_1_efficiency_lag_1",
+        "feat_generator_1_efficiency_lag_2",
+        "feat_generator_1_efficiency_lag_4",
+        "feat_generator_1_efficiency_lag_8",
+        "feat_generator_1_efficiency_lag_16",
+        "feat_generator_1_efficiency_lag_32",
+        "feat_generator_1_efficiency_lag_96",
+        "feat_generator_1_efficiency_lag_192",
+        "feat_generator_1_efficiency_lag_288",
+        "feat_generator_1_efficiency_lag_672",
+        "feat_generator_1_efficiency_diff_1",
+        "feat_generator_1_efficiency_diff_2",
+        "feat_generator_1_efficiency_diff_4",
+        "feat_generator_1_efficiency_diff_8",
+        "feat_generator_1_efficiency_diff_16",
+        "feat_generator_1_efficiency_mean_4",
+        "feat_generator_1_efficiency_std_4",
+        "feat_generator_1_efficiency_vs_mean_4",
+        "feat_generator_1_efficiency_mean_8",
+        "feat_generator_1_efficiency_std_8",
+        "feat_generator_1_efficiency_vs_mean_8",
+        "feat_generator_1_efficiency_mean_16",
+        "feat_generator_1_efficiency_std_16",
+        "feat_generator_1_efficiency_vs_mean_16",
+        "feat_generator_1_efficiency_mean_32",
+        "feat_generator_1_efficiency_std_32",
+        "feat_generator_1_efficiency_vs_mean_32",
+        "feat_generator_1_efficiency_mean_96",
+        "feat_generator_1_efficiency_std_96",
+        "feat_generator_1_efficiency_vs_mean_96",
+        "feat_generator_1_efficiency_slope_4",
+        "feat_generator_1_efficiency_slope_8",
+        "feat_generator_rest_efficiency_lag_1",
+        "feat_generator_rest_efficiency_lag_2",
+        "feat_generator_rest_efficiency_lag_4",
+        "feat_generator_rest_efficiency_lag_8",
+        "feat_generator_rest_efficiency_lag_16",
+        "feat_generator_rest_efficiency_lag_32",
+        "feat_generator_rest_efficiency_lag_96",
+        "feat_generator_rest_efficiency_lag_192",
+        "feat_generator_rest_efficiency_lag_288",
+        "feat_generator_rest_efficiency_lag_672",
+        "feat_generator_rest_efficiency_diff_1",
+        "feat_generator_rest_efficiency_diff_2",
+        "feat_generator_rest_efficiency_diff_4",
+        "feat_generator_rest_efficiency_diff_8",
+        "feat_generator_rest_efficiency_diff_16",
+        "feat_generator_rest_efficiency_mean_4",
+        "feat_generator_rest_efficiency_std_4",
+        "feat_generator_rest_efficiency_vs_mean_4",
+        "feat_generator_rest_efficiency_mean_8",
+        "feat_generator_rest_efficiency_std_8",
+        "feat_generator_rest_efficiency_vs_mean_8",
+        "feat_generator_rest_efficiency_mean_16",
+        "feat_generator_rest_efficiency_std_16",
+        "feat_generator_rest_efficiency_vs_mean_16",
+        "feat_generator_rest_efficiency_mean_32",
+        "feat_generator_rest_efficiency_std_32",
+        "feat_generator_rest_efficiency_vs_mean_32",
+        "feat_generator_rest_efficiency_mean_96",
+        "feat_generator_rest_efficiency_std_96",
+        "feat_generator_rest_efficiency_vs_mean_96",
+        "feat_generator_rest_efficiency_slope_4",
+        "feat_generator_rest_efficiency_slope_8",
+        "current_price",
+        "future_price_15",
+        "price_delta_15",
+        "future_price_30",
+        "price_delta_30",
+        "future_price_45",
+        "price_delta_45",
+        "future_price_60",
+        "price_delta_60",
+        "future_price_75",
+        "price_delta_75",
+        "future_price_90",
+        "price_delta_90",
+        "future_price_105",
+        "price_delta_105",
+        "future_price_120",
+        "price_delta_120",
+        "max_price_next_120",
+        "min_price_next_120",
+        "price_range_next_120",
+        "switch_within_120",
+        "steps_to_first_switch",
+        "switch_direction",
+        "first_switch_delta",
+        "n_switches_120",
+        "c0_delta_from_persistence",
+        "v2_v3_disagreement",
+        "branch_prediction_std",
+        "target_generator_1",
+        "target_generator_all",
+        "horizon_105",
+        "horizon_120",
+        "horizon_15",
+        "horizon_30",
+        "horizon_45",
+        "horizon_60",
+        "horizon_75",
+        "horizon_90"
+      ],
+      "fold_trajectory": [
+        {
+          "fold": "dev_01",
+          "fallback": "zero_correction"
+        },
+        {
+          "fold": "dev_02",
+          "train_switch_rows": 1408,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_03",
+          "train_switch_rows": 2816,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_04",
+          "train_switch_rows": 4224,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_05",
+          "train_switch_rows": 5632,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_06",
+          "train_switch_rows": 7040,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_07",
+          "train_switch_rows": 8448,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_08",
+          "train_switch_rows": 9856,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_09",
+          "train_switch_rows": 11264,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_10",
+          "train_switch_rows": 12672,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_11",
+          "train_switch_rows": 14080,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_12",
+          "train_switch_rows": 15488,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_13",
+          "train_switch_rows": 16896,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_14",
+          "train_switch_rows": 18304,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_15",
+          "train_switch_rows": 19712,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_16",
+          "train_switch_rows": 21120,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_17",
+          "train_switch_rows": 22528,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_18",
+          "train_switch_rows": 23936,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_19",
+          "train_switch_rows": 25344,
+          "active_rows": 1408
+        },
+        {
+          "fold": "blind",
+          "fallback": "zero_correction"
+        }
+      ],
+      "active_rows": 28852
+    },
+    "huber": {
+      "model": "huber",
+      "feature_columns": [
+        "current_value",
+        "c0_pred",
+        "feat_generator_1_clean",
+        "feat_generator_1_is_outlier",
+        "feat_generator_1_outlier_score",
+        "feat_generator_1_steps_since_outlier",
+        "feat_generator_1_local_median_deviation",
+        "feat_generator_1_freeze_length",
+        "feat_generator_1_near_freeze_length",
+        "feat_generator_1_freeze_started",
+        "feat_generator_1_freeze_ended",
+        "feat_generator_1_post_freeze_jump",
+        "feat_generator_gas_total",
+        "feat_generator_1_efficiency",
+        "feat_generator_rest_efficiency",
+        "feat_generator_1_lag_1",
+        "feat_generator_1_lag_2",
+        "feat_generator_1_lag_4",
+        "feat_generator_1_lag_8",
+        "feat_generator_1_lag_16",
+        "feat_generator_1_lag_32",
+        "feat_generator_1_lag_96",
+        "feat_generator_1_lag_192",
+        "feat_generator_1_lag_288",
+        "feat_generator_1_lag_672",
+        "feat_generator_1_diff_1",
+        "feat_generator_1_diff_2",
+        "feat_generator_1_diff_4",
+        "feat_generator_1_diff_8",
+        "feat_generator_1_diff_16",
+        "feat_generator_1_mean_4",
+        "feat_generator_1_std_4",
+        "feat_generator_1_min_4",
+        "feat_generator_1_max_4",
+        "feat_generator_1_vs_mean_4",
+        "feat_generator_1_mean_8",
+        "feat_generator_1_std_8",
+        "feat_generator_1_min_8",
+        "feat_generator_1_max_8",
+        "feat_generator_1_vs_mean_8",
+        "feat_generator_1_mean_16",
+        "feat_generator_1_std_16",
+        "feat_generator_1_min_16",
+        "feat_generator_1_max_16",
+        "feat_generator_1_vs_mean_16",
+        "feat_generator_1_mean_32",
+        "feat_generator_1_std_32",
+        "feat_generator_1_min_32",
+        "feat_generator_1_max_32",
+        "feat_generator_1_vs_mean_32",
+        "feat_generator_1_mean_96",
+        "feat_generator_1_std_96",
+        "feat_generator_1_min_96",
+        "feat_generator_1_max_96",
+        "feat_generator_1_vs_mean_96",
+        "feat_generator_1_slope_4",
+        "feat_generator_1_slope_8",
+        "feat_generator_1_same_slot_median_14d",
+        "feat_generator_1_same_slot_mean_3d",
+        "feat_generator_1_vs_same_slot_mean_3d",
+        "feat_generator_1_same_slot_mean_7d",
+        "feat_generator_1_vs_same_slot_mean_7d",
+        "feat_generator_1_same_slot_mean_14d",
+        "feat_generator_1_vs_same_slot_mean_14d",
+        "feat_generator_rest_lag_1",
+        "feat_generator_rest_lag_2",
+        "feat_generator_rest_lag_4",
+        "feat_generator_rest_lag_8",
+        "feat_generator_rest_lag_16",
+        "feat_generator_rest_lag_32",
+        "feat_generator_rest_lag_96",
+        "feat_generator_rest_lag_192",
+        "feat_generator_rest_lag_288",
+        "feat_generator_rest_lag_672",
+        "feat_generator_rest_diff_1",
+        "feat_generator_rest_diff_2",
+        "feat_generator_rest_diff_4",
+        "feat_generator_rest_diff_8",
+        "feat_generator_rest_diff_16",
+        "feat_generator_rest_mean_4",
+        "feat_generator_rest_std_4",
+        "feat_generator_rest_min_4",
+        "feat_generator_rest_max_4",
+        "feat_generator_rest_vs_mean_4",
+        "feat_generator_rest_mean_8",
+        "feat_generator_rest_std_8",
+        "feat_generator_rest_min_8",
+        "feat_generator_rest_max_8",
+        "feat_generator_rest_vs_mean_8",
+        "feat_generator_rest_mean_16",
+        "feat_generator_rest_std_16",
+        "feat_generator_rest_min_16",
+        "feat_generator_rest_max_16",
+        "feat_generator_rest_vs_mean_16",
+        "feat_generator_rest_mean_32",
+        "feat_generator_rest_std_32",
+        "feat_generator_rest_min_32",
+        "feat_generator_rest_max_32",
+        "feat_generator_rest_vs_mean_32",
+        "feat_generator_rest_mean_96",
+        "feat_generator_rest_std_96",
+        "feat_generator_rest_min_96",
+        "feat_generator_rest_max_96",
+        "feat_generator_rest_vs_mean_96",
+        "feat_generator_rest_slope_4",
+        "feat_generator_rest_slope_8",
+        "feat_generator_rest_same_slot_median_14d",
+        "feat_generator_rest_same_slot_mean_3d",
+        "feat_generator_rest_vs_same_slot_mean_3d",
+        "feat_generator_rest_same_slot_mean_7d",
+        "feat_generator_rest_vs_same_slot_mean_7d",
+        "feat_generator_rest_same_slot_mean_14d",
+        "feat_generator_rest_vs_same_slot_mean_14d",
+        "feat_generator_1_efficiency_lag_1",
+        "feat_generator_1_efficiency_lag_2",
+        "feat_generator_1_efficiency_lag_4",
+        "feat_generator_1_efficiency_lag_8",
+        "feat_generator_1_efficiency_lag_16",
+        "feat_generator_1_efficiency_lag_32",
+        "feat_generator_1_efficiency_lag_96",
+        "feat_generator_1_efficiency_lag_192",
+        "feat_generator_1_efficiency_lag_288",
+        "feat_generator_1_efficiency_lag_672",
+        "feat_generator_1_efficiency_diff_1",
+        "feat_generator_1_efficiency_diff_2",
+        "feat_generator_1_efficiency_diff_4",
+        "feat_generator_1_efficiency_diff_8",
+        "feat_generator_1_efficiency_diff_16",
+        "feat_generator_1_efficiency_mean_4",
+        "feat_generator_1_efficiency_std_4",
+        "feat_generator_1_efficiency_vs_mean_4",
+        "feat_generator_1_efficiency_mean_8",
+        "feat_generator_1_efficiency_std_8",
+        "feat_generator_1_efficiency_vs_mean_8",
+        "feat_generator_1_efficiency_mean_16",
+        "feat_generator_1_efficiency_std_16",
+        "feat_generator_1_efficiency_vs_mean_16",
+        "feat_generator_1_efficiency_mean_32",
+        "feat_generator_1_efficiency_std_32",
+        "feat_generator_1_efficiency_vs_mean_32",
+        "feat_generator_1_efficiency_mean_96",
+        "feat_generator_1_efficiency_std_96",
+        "feat_generator_1_efficiency_vs_mean_96",
+        "feat_generator_1_efficiency_slope_4",
+        "feat_generator_1_efficiency_slope_8",
+        "feat_generator_rest_efficiency_lag_1",
+        "feat_generator_rest_efficiency_lag_2",
+        "feat_generator_rest_efficiency_lag_4",
+        "feat_generator_rest_efficiency_lag_8",
+        "feat_generator_rest_efficiency_lag_16",
+        "feat_generator_rest_efficiency_lag_32",
+        "feat_generator_rest_efficiency_lag_96",
+        "feat_generator_rest_efficiency_lag_192",
+        "feat_generator_rest_efficiency_lag_288",
+        "feat_generator_rest_efficiency_lag_672",
+        "feat_generator_rest_efficiency_diff_1",
+        "feat_generator_rest_efficiency_diff_2",
+        "feat_generator_rest_efficiency_diff_4",
+        "feat_generator_rest_efficiency_diff_8",
+        "feat_generator_rest_efficiency_diff_16",
+        "feat_generator_rest_efficiency_mean_4",
+        "feat_generator_rest_efficiency_std_4",
+        "feat_generator_rest_efficiency_vs_mean_4",
+        "feat_generator_rest_efficiency_mean_8",
+        "feat_generator_rest_efficiency_std_8",
+        "feat_generator_rest_efficiency_vs_mean_8",
+        "feat_generator_rest_efficiency_mean_16",
+        "feat_generator_rest_efficiency_std_16",
+        "feat_generator_rest_efficiency_vs_mean_16",
+        "feat_generator_rest_efficiency_mean_32",
+        "feat_generator_rest_efficiency_std_32",
+        "feat_generator_rest_efficiency_vs_mean_32",
+        "feat_generator_rest_efficiency_mean_96",
+        "feat_generator_rest_efficiency_std_96",
+        "feat_generator_rest_efficiency_vs_mean_96",
+        "feat_generator_rest_efficiency_slope_4",
+        "feat_generator_rest_efficiency_slope_8",
+        "current_price",
+        "future_price_15",
+        "price_delta_15",
+        "future_price_30",
+        "price_delta_30",
+        "future_price_45",
+        "price_delta_45",
+        "future_price_60",
+        "price_delta_60",
+        "future_price_75",
+        "price_delta_75",
+        "future_price_90",
+        "price_delta_90",
+        "future_price_105",
+        "price_delta_105",
+        "future_price_120",
+        "price_delta_120",
+        "max_price_next_120",
+        "min_price_next_120",
+        "price_range_next_120",
+        "switch_within_120",
+        "steps_to_first_switch",
+        "switch_direction",
+        "first_switch_delta",
+        "n_switches_120",
+        "c0_delta_from_persistence",
+        "v2_v3_disagreement",
+        "branch_prediction_std",
+        "target_generator_1",
+        "target_generator_all",
+        "horizon_105",
+        "horizon_120",
+        "horizon_15",
+        "horizon_30",
+        "horizon_45",
+        "horizon_60",
+        "horizon_75",
+        "horizon_90"
+      ],
+      "fold_trajectory": [
+        {
+          "fold": "dev_01",
+          "fallback": "zero_correction"
+        },
+        {
+          "fold": "dev_02",
+          "train_switch_rows": 1408,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_03",
+          "train_switch_rows": 2816,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_04",
+          "train_switch_rows": 4224,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_05",
+          "train_switch_rows": 5632,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_06",
+          "train_switch_rows": 7040,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_07",
+          "train_switch_rows": 8448,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_08",
+          "train_switch_rows": 9856,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_09",
+          "train_switch_rows": 11264,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_10",
+          "train_switch_rows": 12672,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_11",
+          "train_switch_rows": 14080,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_12",
+          "train_switch_rows": 15488,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_13",
+          "train_switch_rows": 16896,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_14",
+          "train_switch_rows": 18304,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_15",
+          "train_switch_rows": 19712,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_16",
+          "train_switch_rows": 21120,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_17",
+          "train_switch_rows": 22528,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_18",
+          "train_switch_rows": 23936,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_19",
+          "train_switch_rows": 25344,
+          "active_rows": 1408
+        },
+        {
+          "fold": "blind",
+          "fallback": "zero_correction"
+        }
+      ],
+      "active_rows": 28852
+    },
+    "gam": {
+      "model": "gam",
+      "feature_columns": [
+        "current_value",
+        "c0_pred",
+        "feat_generator_1_clean",
+        "feat_generator_1_is_outlier",
+        "feat_generator_1_outlier_score",
+        "feat_generator_1_steps_since_outlier",
+        "feat_generator_1_local_median_deviation",
+        "feat_generator_1_freeze_length",
+        "feat_generator_1_near_freeze_length",
+        "feat_generator_1_freeze_started",
+        "feat_generator_1_freeze_ended",
+        "feat_generator_1_post_freeze_jump",
+        "feat_generator_gas_total",
+        "feat_generator_1_efficiency",
+        "feat_generator_rest_efficiency",
+        "feat_generator_1_lag_1",
+        "feat_generator_1_lag_2",
+        "feat_generator_1_lag_4",
+        "feat_generator_1_lag_8",
+        "feat_generator_1_lag_16",
+        "feat_generator_1_lag_32",
+        "feat_generator_1_lag_96",
+        "feat_generator_1_lag_192",
+        "feat_generator_1_lag_288",
+        "feat_generator_1_lag_672",
+        "feat_generator_1_diff_1",
+        "feat_generator_1_diff_2",
+        "feat_generator_1_diff_4",
+        "feat_generator_1_diff_8",
+        "feat_generator_1_diff_16",
+        "feat_generator_1_mean_4",
+        "feat_generator_1_std_4",
+        "feat_generator_1_min_4",
+        "feat_generator_1_max_4",
+        "feat_generator_1_vs_mean_4",
+        "feat_generator_1_mean_8",
+        "feat_generator_1_std_8",
+        "feat_generator_1_min_8",
+        "feat_generator_1_max_8",
+        "feat_generator_1_vs_mean_8",
+        "feat_generator_1_mean_16",
+        "feat_generator_1_std_16",
+        "feat_generator_1_min_16",
+        "feat_generator_1_max_16",
+        "feat_generator_1_vs_mean_16",
+        "feat_generator_1_mean_32",
+        "feat_generator_1_std_32",
+        "feat_generator_1_min_32",
+        "feat_generator_1_max_32",
+        "feat_generator_1_vs_mean_32",
+        "feat_generator_1_mean_96",
+        "feat_generator_1_std_96",
+        "feat_generator_1_min_96",
+        "feat_generator_1_max_96",
+        "feat_generator_1_vs_mean_96",
+        "feat_generator_1_slope_4",
+        "feat_generator_1_slope_8",
+        "feat_generator_1_same_slot_median_14d",
+        "feat_generator_1_same_slot_mean_3d",
+        "feat_generator_1_vs_same_slot_mean_3d",
+        "feat_generator_1_same_slot_mean_7d",
+        "feat_generator_1_vs_same_slot_mean_7d",
+        "feat_generator_1_same_slot_mean_14d",
+        "feat_generator_1_vs_same_slot_mean_14d",
+        "feat_generator_rest_lag_1",
+        "feat_generator_rest_lag_2",
+        "feat_generator_rest_lag_4",
+        "feat_generator_rest_lag_8",
+        "feat_generator_rest_lag_16",
+        "feat_generator_rest_lag_32",
+        "feat_generator_rest_lag_96",
+        "feat_generator_rest_lag_192",
+        "feat_generator_rest_lag_288",
+        "feat_generator_rest_lag_672",
+        "feat_generator_rest_diff_1",
+        "feat_generator_rest_diff_2",
+        "feat_generator_rest_diff_4",
+        "feat_generator_rest_diff_8",
+        "feat_generator_rest_diff_16",
+        "feat_generator_rest_mean_4",
+        "feat_generator_rest_std_4",
+        "feat_generator_rest_min_4",
+        "feat_generator_rest_max_4",
+        "feat_generator_rest_vs_mean_4",
+        "feat_generator_rest_mean_8",
+        "feat_generator_rest_std_8",
+        "feat_generator_rest_min_8",
+        "feat_generator_rest_max_8",
+        "feat_generator_rest_vs_mean_8",
+        "feat_generator_rest_mean_16",
+        "feat_generator_rest_std_16",
+        "feat_generator_rest_min_16",
+        "feat_generator_rest_max_16",
+        "feat_generator_rest_vs_mean_16",
+        "feat_generator_rest_mean_32",
+        "feat_generator_rest_std_32",
+        "feat_generator_rest_min_32",
+        "feat_generator_rest_max_32",
+        "feat_generator_rest_vs_mean_32",
+        "feat_generator_rest_mean_96",
+        "feat_generator_rest_std_96",
+        "feat_generator_rest_min_96",
+        "feat_generator_rest_max_96",
+        "feat_generator_rest_vs_mean_96",
+        "feat_generator_rest_slope_4",
+        "feat_generator_rest_slope_8",
+        "feat_generator_rest_same_slot_median_14d",
+        "feat_generator_rest_same_slot_mean_3d",
+        "feat_generator_rest_vs_same_slot_mean_3d",
+        "feat_generator_rest_same_slot_mean_7d",
+        "feat_generator_rest_vs_same_slot_mean_7d",
+        "feat_generator_rest_same_slot_mean_14d",
+        "feat_generator_rest_vs_same_slot_mean_14d",
+        "feat_generator_1_efficiency_lag_1",
+        "feat_generator_1_efficiency_lag_2",
+        "feat_generator_1_efficiency_lag_4",
+        "feat_generator_1_efficiency_lag_8",
+        "feat_generator_1_efficiency_lag_16",
+        "feat_generator_1_efficiency_lag_32",
+        "feat_generator_1_efficiency_lag_96",
+        "feat_generator_1_efficiency_lag_192",
+        "feat_generator_1_efficiency_lag_288",
+        "feat_generator_1_efficiency_lag_672",
+        "feat_generator_1_efficiency_diff_1",
+        "feat_generator_1_efficiency_diff_2",
+        "feat_generator_1_efficiency_diff_4",
+        "feat_generator_1_efficiency_diff_8",
+        "feat_generator_1_efficiency_diff_16",
+        "feat_generator_1_efficiency_mean_4",
+        "feat_generator_1_efficiency_std_4",
+        "feat_generator_1_efficiency_vs_mean_4",
+        "feat_generator_1_efficiency_mean_8",
+        "feat_generator_1_efficiency_std_8",
+        "feat_generator_1_efficiency_vs_mean_8",
+        "feat_generator_1_efficiency_mean_16",
+        "feat_generator_1_efficiency_std_16",
+        "feat_generator_1_efficiency_vs_mean_16",
+        "feat_generator_1_efficiency_mean_32",
+        "feat_generator_1_efficiency_std_32",
+        "feat_generator_1_efficiency_vs_mean_32",
+        "feat_generator_1_efficiency_mean_96",
+        "feat_generator_1_efficiency_std_96",
+        "feat_generator_1_efficiency_vs_mean_96",
+        "feat_generator_1_efficiency_slope_4",
+        "feat_generator_1_efficiency_slope_8",
+        "feat_generator_rest_efficiency_lag_1",
+        "feat_generator_rest_efficiency_lag_2",
+        "feat_generator_rest_efficiency_lag_4",
+        "feat_generator_rest_efficiency_lag_8",
+        "feat_generator_rest_efficiency_lag_16",
+        "feat_generator_rest_efficiency_lag_32",
+        "feat_generator_rest_efficiency_lag_96",
+        "feat_generator_rest_efficiency_lag_192",
+        "feat_generator_rest_efficiency_lag_288",
+        "feat_generator_rest_efficiency_lag_672",
+        "feat_generator_rest_efficiency_diff_1",
+        "feat_generator_rest_efficiency_diff_2",
+        "feat_generator_rest_efficiency_diff_4",
+        "feat_generator_rest_efficiency_diff_8",
+        "feat_generator_rest_efficiency_diff_16",
+        "feat_generator_rest_efficiency_mean_4",
+        "feat_generator_rest_efficiency_std_4",
+        "feat_generator_rest_efficiency_vs_mean_4",
+        "feat_generator_rest_efficiency_mean_8",
+        "feat_generator_rest_efficiency_std_8",
+        "feat_generator_rest_efficiency_vs_mean_8",
+        "feat_generator_rest_efficiency_mean_16",
+        "feat_generator_rest_efficiency_std_16",
+        "feat_generator_rest_efficiency_vs_mean_16",
+        "feat_generator_rest_efficiency_mean_32",
+        "feat_generator_rest_efficiency_std_32",
+        "feat_generator_rest_efficiency_vs_mean_32",
+        "feat_generator_rest_efficiency_mean_96",
+        "feat_generator_rest_efficiency_std_96",
+        "feat_generator_rest_efficiency_vs_mean_96",
+        "feat_generator_rest_efficiency_slope_4",
+        "feat_generator_rest_efficiency_slope_8",
+        "current_price",
+        "future_price_15",
+        "price_delta_15",
+        "future_price_30",
+        "price_delta_30",
+        "future_price_45",
+        "price_delta_45",
+        "future_price_60",
+        "price_delta_60",
+        "future_price_75",
+        "price_delta_75",
+        "future_price_90",
+        "price_delta_90",
+        "future_price_105",
+        "price_delta_105",
+        "future_price_120",
+        "price_delta_120",
+        "max_price_next_120",
+        "min_price_next_120",
+        "price_range_next_120",
+        "switch_within_120",
+        "steps_to_first_switch",
+        "switch_direction",
+        "first_switch_delta",
+        "n_switches_120",
+        "c0_delta_from_persistence",
+        "v2_v3_disagreement",
+        "branch_prediction_std",
+        "target_generator_1",
+        "target_generator_all",
+        "horizon_105",
+        "horizon_120",
+        "horizon_15",
+        "horizon_30",
+        "horizon_45",
+        "horizon_60",
+        "horizon_75",
+        "horizon_90"
+      ],
+      "fold_trajectory": [
+        {
+          "fold": "dev_01",
+          "fallback": "zero_correction"
+        },
+        {
+          "fold": "dev_02",
+          "train_switch_rows": 1408,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_03",
+          "train_switch_rows": 2816,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_04",
+          "train_switch_rows": 4224,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_05",
+          "train_switch_rows": 5632,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_06",
+          "train_switch_rows": 7040,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_07",
+          "train_switch_rows": 8448,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_08",
+          "train_switch_rows": 9856,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_09",
+          "train_switch_rows": 11264,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_10",
+          "train_switch_rows": 12672,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_11",
+          "train_switch_rows": 14080,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_12",
+          "train_switch_rows": 15488,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_13",
+          "train_switch_rows": 16896,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_14",
+          "train_switch_rows": 18304,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_15",
+          "train_switch_rows": 19712,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_16",
+          "train_switch_rows": 21120,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_17",
+          "train_switch_rows": 22528,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_18",
+          "train_switch_rows": 23936,
+          "active_rows": 1408
+        },
+        {
+          "fold": "dev_19",
+          "train_switch_rows": 25344,
+          "active_rows": 1408
+        },
+        {
+          "fold": "blind",
+          "fallback": "zero_correction"
+        }
+      ],
+      "active_rows": 28852
+    }
+  }
+}
