@@ -1,5 +1,68 @@
 # 决策记录
 
+## 2026-08-10 Gate E 完整通过：SAFE60 production runner 全门禁绿（PRE-PRODUCTION → PRODUCTION-ELIGIBLE 就绪）
+
+- **E0 seed contract**：9/9 测试 PASS（replay=fold_position 0-18，production=slot 100，
+  未知 cutoff FAIL CLOSED，seed 是工程确定性参数禁止扫描）。
+- **E1 六层 production**：RichGas/A51/splice/A60/A61/X3 全部 fit-once + predict，
+  dev 折逐位复现（max|diff|=5.7e-14）。抓出 3 个真实 bug：X3 imputer 一致性、
+  A51 corrector baseline=aggressive（非 rich_gas_blend_30）、splice 仅 g1 参与
+  （gall 保持 baseline）+ 输出投影。
+- **E2 全链端到端 replay：19/19 折 PASS**，max|diff| ≤ 1.1e-13、correlation=1.0、
+  pooled 与冻结 OOF 完全一致。空 history 折回退 baseline（dev_01）。
+- **E3/E4 最终 fit + 评分推理**：final cutoff 2025-05-01 00:00、seed slot 100；
+  A61 final cutoff=first_held-30min（one-step 标签成熟边界）；RichGas 用 final OOF
+  （含 confirmed blind，31429 history 行），A51/A60 用 dev OOF（无 final OOF 存在）；
+  missing_current=causal_forward_fill（3 个隐藏 origin）。输出 3072 cells × 192
+  origins 全 finite。
+- **E5 future perturbation**：32/32 特征检查零失败（8 origins × extreme/shuffle/
+  null/delete），证明评分特征对 origin 后数据完全不变。
+- **E6 s_result 冻结**：SHA256 `a73ded1812eb223a156870eee62affbdc2b25df0335443b08ac838bf24a32284`，
+  192 rows、schema 与 R1 冻结 s_result 一致。
+- **结论**：SAFE60 production 链无语义漂移（逐位复现），状态从 DEV-ELIGIBLE 升级为
+  PRODUCTION-ELIGIBLE（待平台上传验证）。产物：
+  `results/raw/runs/audits/pred1_e34_scoring_20260810/`。
+- 下一步：R1 打包（冻结 s_result + R1 input → ZIP）→ 平台一次上传，比较 acc/1-MAPE。
+
+## 2026-08-10 Gate E3/E4 政策拍板（Pre-Production 生产边界）
+
+### E3 Blind 政策：允许纳入最终 refit（单向冻结）
+
+- SAFE60 六层（RichGas/A51/A60/A61/X3）最终生产 fit 允许
+  `confirmed_blind_oof_used_for_refit = true`，前提是 confirmed blind 是训练期
+  内部已知标签块，**不是**官方评分期/测试期标签。
+- **单向冻结约束**：模型结构/特征/超参/路由/fallback/blend 权重先全部冻结 →
+  blind 仅做最后一次确认 → 全训练区间 refit（含 confirmed blind）→ scoring。
+  refit 后禁止再根据 blind 指标改任何配置。
+- **报告语义**：blind/OOF 性能必须保留 pre-refit 冻结模型的版本；不得拿 refit
+  后模型重算同一批标签冒充 blind 性能。
+- **stacking 语义**：元模型需要的输入中，blind 只能以其严格 OOF 预测进入，不能
+  喂 in-sample base prediction（本链各层 parent 列即 OOF 预测，天然满足）。
+- manifest 字段：
+  `confirmed_blind_labels_used_for_selection = false`
+  `confirmed_blind_oof_used_for_refit = true`
+  `post_blind_tuning_allowed = false`
+
+### E4 隐藏 current 政策：causal forward-fill（禁止 R1 重建值）
+
+- 3 个隐藏评分 origin（2025-05-02 10:15 g1、21:45 g1、13:15 gall）的 generator
+  current 缺失。测试集 `generator_use_*` 是煤气消耗量（不同量纲），**无确定性
+  恒等式**可恢复（gall≠g1+分量和，gall/g1 比值 1.0–8.7 无固定关系）→ 确定性
+  恢复优先级不适用。
+- 正式 scoring 默认 `missing_current_policy = causal_forward_fill`：只读取
+  `< origin` 最近可见观测 LOCF，不使用未来值、不使用 R1 重建值。
+- **R1 reconstructed current 仅作 diagnostic/reference channel，禁止进入正式
+  scoring inference**（即使历史 aggressive baseline 用过，不为极小增益增加合规耦合）。
+- E5 perturbation 增加专属 case：删除/改掉 origin 后全部 generator 值，验证
+  3 个隐藏 origin 的 current reconstruction 与最终预测完全不变（证明 E4 无未来偷看）。
+- audit 记录：`affected_origins=3, uses_future_data=false, uses_reference_reconstruction=false`。
+
+### 冻结边界
+
+- fallback 修复（空 history → baseline）已并入 production_runner.py；dev_01（空
+  history）+ dev_19 已 PASS（机器精度）。**完整 19 折 E2 重跑 = 新的冻结边界**，
+  若 19 折结果改变，先据 19 折重新决定 SAFE60 是否成立，再进 blind/E3。
+
 ## 2026-08-10 SAFE60 development 定义永久冻结（DEV-ELIGIBLE / PRE-PRODUCTION）
 
 - 基于 B1/B2/C/D 四重 PASS（X3/A61 逐字节 replay、SAFE60 5.099520 精确复现、

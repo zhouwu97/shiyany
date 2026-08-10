@@ -936,6 +936,43 @@ def confirm_frozen_blend_on_blind(
     }
 
 
+def project_production_predictions(
+    rows: pd.DataFrame,
+    prediction_column: str,
+    *,
+    output_column: str,
+    max_generator_rest: float = 240.0,
+) -> pd.DataFrame:
+    """对生产预测长表执行与 OOF 一致的容量投影；不要求 actual/persistence。
+
+    与 :func:`project_long_candidate` 共享同一可行域规则
+    （g1 [0,200]、gall [0,440]、gall in [g1, g1+240]），但生产帧没有 actual /
+    persistence_pred，因此不调用 OOF 契约校验。要求每个 fold×origin×horizon
+    同时含两个 target。
+    """
+
+    keys = ["fold", "origin_time", "horizon"]
+    counts = rows.groupby(keys, observed=True)["target"].nunique()
+    if not counts.eq(2).all():
+        raise ValueError("容量投影要求每个 fold×origin×horizon 同时包含两个目标")
+    wide = rows.pivot(index=keys, columns="target", values=prediction_column)
+    if not {"generator_1", "generator_all"}.issubset(wide.columns):
+        raise ValueError("容量投影缺少 generator_1 或 generator_all")
+    wide["generator_1"] = wide["generator_1"].clip(0.0, 200.0)
+    wide["generator_all"] = wide["generator_all"].clip(0.0, 440.0)
+    wide["generator_all"] = np.maximum(wide["generator_all"], wide["generator_1"])
+    wide["generator_all"] = np.minimum(
+        wide["generator_all"], wide["generator_1"] + max_generator_rest
+    )
+    lookup = wide.stack()
+    row_index = pd.MultiIndex.from_frame(rows.loc[:, keys + ["target"]])
+    out = rows.copy()
+    out[output_column] = lookup.reindex(row_index).to_numpy(dtype=float)
+    if out[output_column].isna().any():
+        raise ValueError("容量投影后的生产长表存在缺失值")
+    return out
+
+
 def project_long_candidate(
     rows: pd.DataFrame,
     prediction_column: str,

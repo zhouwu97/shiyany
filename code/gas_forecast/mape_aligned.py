@@ -35,7 +35,10 @@ from catboost import CatBoostRegressor
 from lightgbm import LGBMRegressor
 from sklearn.impute import SimpleImputer
 
-from gas_forecast.aggressive import project_long_candidate
+from gas_forecast.aggressive import (
+    project_long_candidate,
+    project_production_predictions,
+)
 from gas_forecast.research import compare_research_candidate
 from gas_forecast.rich_residual import select_rich_feature_columns
 from joblib import Parallel, delayed
@@ -717,6 +720,162 @@ def build_mape_aligned_oof(
     )
 
 
+def fit_x3_cell_production(
+    frame: pd.DataFrame,
+    features: pd.DataFrame,
+    *,
+    cutoff: pd.Timestamp,
+    target: str,
+    horizon: int,
+    seed_position: int,
+    feature_columns: list[str] | None = None,
+) -> tuple[CatBoostRegressor, dict[str, object]]:
+    """在单个冻结 cutoff 上拟合一个 cat_mae cell 模型（fit-once / replay 共用）。
+
+    ``seed_position`` 来自 seed_contract：replay = frozen fold position，
+    production = PRODUCTION_SEED_SLOT。标签只取 ``origin <= cutoff`` 且
+    ``origin + horizon <= cutoff``；不读取 held / blind / 未来评分行。
+    """
+
+    from gas_forecast.seed_contract import seed_offset
+
+    if feature_columns is None:
+        feature_columns = select_rich_feature_columns(features, "long_horizon")
+    train_origins, delta, future_values, trace = _cell_training_data(
+        frame, train_end=cutoff, target=target, horizon=horizon
+    )
+    if len(train_origins) < X3_MIN_TRAIN_ROWS:
+        raise RuntimeError(
+            f"X3 production {target} t+{horizon} 训练行不足: {len(train_origins)}"
+        )
+    epsilon = _epsilon_rule(future_values)
+    weights = _sample_weights(future_values, epsilon)
+    training_features = _feature_matrix(features, train_origins, feature_columns)
+    usable = np.asarray(
+        np.isfinite(delta)
+        & training_features.notna().any(axis=1).to_numpy(dtype=bool),
+        dtype=bool,
+    )
+    trained_rows = int(usable.sum())
+    if trained_rows < X3_MIN_TRAIN_ROWS:
+        raise RuntimeError(
+            f"X3 production {target} t+{horizon} 可用特征行不足: {trained_rows}"
+        )
+    target_idx = X3_TARGETS.index(target)
+    horizon_idx = X3_HORIZONS.index(horizon)
+    offset = seed_offset(seed_position, target_idx, horizon_idx)
+    params = dict(X3_CAT_PARAMS)
+    params["random_seed"] = X3_RANDOM_SEED + offset
+    imputer = SimpleImputer(strategy="median", keep_empty_features=True)
+    train_matrix = imputer.fit_transform(training_features.loc[usable])
+    model = CatBoostRegressor(**params)
+    model.fit(
+        train_matrix,
+        delta[usable],
+        sample_weight=weights[usable],
+        verbose=False,
+    )
+    receipt = {
+        "seed_position": int(seed_position),
+        "target": target,
+        "horizon_minutes": int(horizon),
+        "seed_offset": int(offset),
+        "effective_seed": int(X3_RANDOM_SEED + offset),
+        "trained_rows": int(trained_rows),
+        "history_rows": int(len(train_origins)),
+        "epsilon": float(epsilon),
+    }
+    return model, imputer, receipt
+
+
+def predict_x3_cell_production(
+    model: CatBoostRegressor,
+    imputer: SimpleImputer,
+    features: pd.DataFrame,
+    *,
+    origins: pd.DatetimeIndex,
+    current_values: np.ndarray,
+    feature_columns: list[str] | None = None,
+) -> np.ndarray:
+    """用冻结 X3 cell 模型预测绝对目标 = current + delta_pred。
+
+    与 OOF ``_fit_branch`` 一致：held 特征先经同一训练侧 median imputer。
+    """
+
+    if feature_columns is None:
+        feature_columns = select_rich_feature_columns(features, "long_horizon")
+    held_features = _feature_matrix(features, origins, feature_columns)
+    held_matrix = imputer.transform(held_features)
+    delta_pred = np.asarray(model.predict(held_matrix), dtype=float)
+    if not np.isfinite(delta_pred).all():
+        raise RuntimeError("X3 production 产生非有限 delta 预测")
+    return current_values + delta_pred
+
+
+def build_x3_production_predictions(
+    frame: pd.DataFrame,
+    features: pd.DataFrame,
+    *,
+    cutoff: pd.Timestamp,
+    origins: pd.DatetimeIndex,
+    seed_position: int,
+    fold_label: str = "production",
+    feature_columns: list[str] | None = None,
+) -> tuple[pd.DataFrame, dict[str, object]]:
+    """fit-once 16 cell cat_mae 并对给定 origin 输出 x3_cat_mae_pred（含容量投影）。
+
+    长表列：fold / origin_time / target / horizon / current_value /
+    x3_cat_mae_raw_pred / x3_cat_mae_pred。**不含 actual**（评分期 actual 是
+    未来真值；replay 由调用方从冻结 OOF 合并，production 由平台评分）。
+    """
+
+    if feature_columns is None:
+        feature_columns = select_rich_feature_columns(features, "long_horizon")
+    parts: list[pd.DataFrame] = []
+    receipts: dict[str, object] = {}
+    for target in X3_TARGETS:
+        for horizon in X3_HORIZONS:
+            model, imputer, receipt = fit_x3_cell_production(
+                frame,
+                features,
+                cutoff=cutoff,
+                target=target,
+                horizon=horizon,
+                seed_position=seed_position,
+                feature_columns=feature_columns,
+            )
+            receipts[f"{target}_t+{horizon}"] = receipt
+            current = (
+                pd.to_numeric(frame[target], errors="coerce")
+                .reindex(origins)
+                .to_numpy(dtype=float)
+            )
+            pred = predict_x3_cell_production(
+                model,
+                imputer,
+                features,
+                origins=origins,
+                current_values=current,
+                feature_columns=feature_columns,
+            )
+            parts.append(
+                pd.DataFrame(
+                    {
+                        "fold": fold_label,
+                        "origin_time": origins,
+                        "target": target,
+                        "horizon": horizon,
+                        "train_end": cutoff,
+                        "current_value": current,
+                        "x3_cat_mae_raw_pred": pred,
+                    }
+                )
+            )
+    long = pd.concat(parts, ignore_index=True)
+    long = project_production_predictions(long, "x3_cat_mae_raw_pred", output_column="x3_cat_mae_pred")
+    return long, receipts
+
+
 __all__ = [
     "MapeAlignedResult",
     "X3_A61_BLEND_WEIGHT",
@@ -733,4 +892,7 @@ __all__ = [
     "X3_RETAIN_IMPROVEMENT_PP",
     "X3_TARGETS",
     "build_mape_aligned_oof",
+    "build_x3_production_predictions",
+    "fit_x3_cell_production",
+    "predict_x3_cell_production",
 ]

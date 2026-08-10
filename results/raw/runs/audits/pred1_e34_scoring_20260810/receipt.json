@@ -1,0 +1,63 @@
+{
+  "final_cutoff": "2025-05-01 00:00:00",
+  "a61_final_cutoff": "2025-04-30 23:30:00",
+  "seed_position": 100,
+  "seed_contract": "production",
+  "missing_current_policy": {
+    "policy": "causal_forward_fill",
+    "affected_origins": 3,
+    "uses_future_data": false,
+    "uses_reference_reconstruction": false
+  },
+  "blind_policy": {
+    "confirmed_blind_labels_used_for_selection": false,
+    "confirmed_blind_oof_used_for_refit": true,
+    "post_blind_tuning_allowed": false,
+    "rich_gas_used_final_oof": true,
+    "a51_a60_used_dev_oof_no_final_exists": true
+  },
+  "scoring_origins": 192,
+  "cells": 3072,
+  "layers": {
+    "rich_gas": {
+      "target": "generator_1",
+      "cutoff": "2025-05-01 00:00:00",
+      "history_rows": 31429,
+      "trained_horizons": [
+        15,
+        30,
+        45,
+        60,
+        75,
+        90,
+        105,
+        120
+      ],
+      "fallback": false
+    },
+    "a51": {
+      "target": "generator_1",
+      "cutoff": "2025-05-01 00:00:00",
+      "history_rows": 29184,
+      "trained_horizons": [
+        75,
+        90,
+        105,
+        120
+      ],
+      "fallback": false
+    },
+    "a60": {
+      "target": "generator_all",
+      "cutoff": "2025-05-01 00:00:00",
+      "history_rows": 29184,
+      "trained_horizons": [
+        75,
+        90,
+        105,
+        120
+      ],
+      "fallback": false
+    }
+  }
+}

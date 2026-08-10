@@ -13,7 +13,7 @@ from typing import Final
 import numpy as np
 import pandas as pd
 
-from gas_forecast.aggressive import project_long_candidate
+from gas_forecast.aggressive import project_long_candidate, project_production_predictions
 from gas_forecast.research import compare_research_candidate
 from gas_forecast.second_tier import RecursiveARX, RecursiveARXSpec, fixed_recursive_blends
 
@@ -298,6 +298,119 @@ def _trace_payload(trace: pd.DataFrame) -> list[dict[str, object]]:
             lambda value: None if pd.isna(value) else pd.Timestamp(value).isoformat()
         )
     return output.to_dict(orient="records")
+
+
+def fit_a61_production(
+    frame: pd.DataFrame,
+    features: pd.DataFrame,
+    *,
+    cutoff: pd.Timestamp,
+    first_held_origin: pd.Timestamp,
+) -> tuple[dict[str, RecursiveARX], dict[str, dict[str, object]]]:
+    """在单个冻结 cutoff 上拟合 A61 两个目标的 RecursiveARX（fit-once / replay 共用）。
+
+    一步标签只取 ``origin <= cutoff`` 且 ``label_end < first_held_origin``；
+    不读取 held / blind / 未来评分行。Ridge 是确定性层，无随机种子。
+    """
+
+    models: dict[str, RecursiveARX] = {}
+    traces: dict[str, dict[str, object]] = {}
+    for target in A61_TARGETS:
+        spec = _spec(target)
+        training_features, training_labels, trace = _training_data(
+            frame,
+            features,
+            target=target,
+            train_end=cutoff,
+            first_held_origin=first_held_origin,
+            spec=spec,
+        )
+        if len(training_labels) < A61_MIN_TRAIN_ROWS:
+            raise RuntimeError(
+                f"A61 production {target} 训练行不足: {len(training_labels)}"
+            )
+        model = RecursiveARX(spec, alpha=A61_ALPHA)
+        model.fit(training_features, training_labels)
+        models[target] = model
+        traces[target] = {**trace, "training_rows": int(len(training_labels))}
+    return models, traces
+
+
+def predict_a61_production(
+    models: dict[str, RecursiveARX],
+    features: pd.DataFrame,
+    *,
+    target_origins: pd.DatetimeIndex,
+) -> dict[str, np.ndarray]:
+    """对给定 origin 输出 A61 八步原始递归（未 blend、未投影）。"""
+
+    predictions: dict[str, np.ndarray] = {}
+    for target, model in models.items():
+        spec = _spec(target)
+        held_features = features.reindex(target_origins).reindex(
+            columns=_feature_columns(spec)
+        )
+        prediction = model.predict(held_features)
+        if prediction.shape != (len(target_origins), len(A61_HORIZONS)):
+            raise RuntimeError("A61 production 递归输出形状不符合八步规格")
+        predictions[target] = prediction
+    return predictions
+
+
+def build_a61_production_predictions(
+    frame: pd.DataFrame,
+    features: pd.DataFrame,
+    *,
+    cutoff: pd.Timestamp,
+    parent: pd.DataFrame,
+    fold_label: str = "production",
+    blend_weight: float = 0.05,
+) -> tuple[pd.DataFrame, dict[str, object]]:
+    """fit-once A61 并对 parent 行输出 a61_recursive_blend_05_pred（含容量投影）。
+
+    ``parent`` 长表须含 fold / origin_time / target / horizon 与父预测列
+    ``a60_gall_long_blend_30_pred``（评分期由 A60 层自底向上计算；replay 用
+    冻结 A60 OOF 该列）。输出列含 a61_recursive_raw_pred /
+    a61_recursive_blend_05_raw_pred / a61_recursive_blend_05_pred；不含 actual。
+    """
+
+    parent = parent.copy()
+    required = {"fold", "origin_time", "target", "horizon", "a60_gall_long_blend_30_pred"}
+    missing = sorted(required.difference(parent.columns))
+    if missing:
+        raise ValueError(f"A61 production parent 缺少字段: {missing}")
+    parent["origin_time"] = pd.to_datetime(parent["origin_time"])
+    origins = pd.DatetimeIndex(sorted(parent["origin_time"].unique()))
+    first_held = pd.Timestamp(origins.min())
+    models, traces = fit_a61_production(
+        frame, features, cutoff=cutoff, first_held_origin=first_held
+    )
+    raw = predict_a61_production(models, features, target_origins=origins)
+    parent["a61_recursive_raw_pred"] = 0.0
+    for target in A61_TARGETS:
+        matrix = raw[target]
+        for step, horizon in enumerate(A61_HORIZONS):
+            mask = parent["target"].eq(target) & parent["horizon"].eq(horizon)
+            values = pd.Series(matrix[:, step], index=origins)
+            parent.loc[mask, "a61_recursive_raw_pred"] = (
+                parent.loc[mask, "origin_time"].map(values).to_numpy(dtype=float)
+            )
+    base = parent["a60_gall_long_blend_30_pred"].to_numpy(dtype=float)
+    rec = parent["a61_recursive_raw_pred"].to_numpy(dtype=float)
+    parent["a61_recursive_blend_05_raw_pred"] = (1.0 - blend_weight) * base + blend_weight * rec
+    parent["fold"] = fold_label
+    parent = project_production_predictions(
+        parent, "a61_recursive_blend_05_raw_pred", output_column="a61_recursive_blend_05_pred"
+    )
+    receipt = {
+        "alpha": A61_ALPHA,
+        "blend_weight": blend_weight,
+        "targets": list(A61_TARGETS),
+        "horizons": list(A61_HORIZONS),
+        "per_target": traces,
+        "seed_contract": "deterministic (Ridge) — no random seed",
+    }
+    return parent, receipt
 
 
 def build_recursive_arx_diversity(

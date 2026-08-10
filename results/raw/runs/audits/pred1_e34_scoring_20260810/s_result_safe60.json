@@ -1,0 +1,26 @@
+{
+  "schema_matches_r1": true,
+  "rows": 192,
+  "columns": [
+    "datetime",
+    "generator_1_t+15_pred",
+    "generator_1_t+30_pred",
+    "generator_1_t+45_pred",
+    "generator_1_t+60_pred",
+    "generator_1_t+75_pred",
+    "generator_1_t+90_pred",
+    "generator_1_t+105_pred",
+    "generator_1_t+120_pred",
+    "generator_all_t+15_pred",
+    "generator_all_t+30_pred",
+    "generator_all_t+45_pred",
+    "generator_all_t+60_pred",
+    "generator_all_t+75_pred",
+    "generator_all_t+90_pred",
+    "generator_all_t+105_pred",
+    "generator_all_t+120_pred"
+  ],
+  "s_result_sha256": "a73ded1812eb223a156870eee62affbdc2b25df0335443b08ac838bf24a32284",
+  "source": "E:\\AI\\shiyan\\results\\raw\\runs\\audits\\pred1_e34_scoring_20260810\\safe60_scoring_oof.csv",
+  "note": "SAFE60 = 0.60*X3 + 0.40*A61；值替代 aggressive baseline；R1 input 未改"
+}
