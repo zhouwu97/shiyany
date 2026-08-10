@@ -1,5 +1,31 @@
 # 实验结果
 
+## 2026-08-10 R1 Exact Reference Input Clone
+
+把 `diaofenyuan/aic-gangtie` 的完整 input 构造链复刻（raw 加载无 allowlist →
+Hampel 672/96/6 + median + 无限制 ffill → 特征训练期 schema sanitize →
+concat(raw, features) → 全矩阵 Q_REFERENCE）。R0/R1 共享同一冻结
+`s_result.csv`（SHA256 `e0f471d873…` 四处一致），只有 `input.csv` 不同，
+R1 链绝不回流模型预测。
+
+| 检查 | R0 (Q5 等价) | R1 (Exact Clone) |
+| --- | ---: | ---: |
+| raw columns | 21 | 22 |
+| feature columns | 534 | 568 |
+| all nonfinite | 0 | 0 |
+| constant columns | 0 | 0 |
+| duplicate columns | 0 | 0 |
+| IQR outlier (linear) | 0 | 0 |
+| IQR outlier (all 5) | 0 | 0 |
+| abs Z > 3 | 0 | 0 |
+| residual dropped columns | 6 | 4 |
+| repaired cells | 2338 | 3377 |
+
+终态全零门禁通过（nonfinite/constant/duplicate/IQR 五法/Z>3 全零），状态
+`LEGAL_R1_READY_FOR_PLATFORM`。产物
+`results/raw/runs/experiments/r1_exact_reference_input_20260810/`，未上传、
+未写入 `results/best` 或 `提交这个*`。建议消耗一次平台提交验证 R1。
+
 ## 2026-08-09 X0 P3 Oracle Ceiling Audit（标签知情诊断上限）
 
 只读复用 `p3_rolling_training_20260809_190558` 的 development OOF，不重训。

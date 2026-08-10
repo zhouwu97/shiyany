@@ -41,14 +41,15 @@ REFERENCE_IQR_INTERPOLATIONS: tuple[str, ...] = (
 class CausalSourceSettings:
     """评分原始字段的历史修复参数。
 
-    默认值固定为参考质量链使用的 672 点历史窗口和 Hampel MAD 阈值 6。训练期
-    中位数仅在这段历史无法提供前向值时作为最后兜底。
+    默认值固定为参考仓库 ``official_preliminary.yaml`` 的提交预处理配置：
+    672 点历史窗口、Hampel 最小历史 96 点和 MAD 阈值 6。训练期中位数仅在
+    这段历史无法提供前向值时作为最后兜底。
     """
 
     history_points: int = 672
     hampel_window: int = 672
     hampel_mad_threshold: float = 6.0
-    hampel_min_periods: int = 168
+    hampel_min_periods: int = 96
 
     def to_dict(self) -> dict[str, object]:
         """返回可直接 JSON 序列化的稳定参数收据。"""
@@ -777,7 +778,8 @@ def prepare_submission_sources(
     """因果地准备提交原始字段，不读取评分期未来行。
 
     为兼容旧调用点，第三个位置参数可保留预处理映射；该映射不改变此函数固定的
-    672 点历史和 Hampel 规则。若第三个参数不是映射，则将其视为 ``origins``。
+    672 点历史、Hampel 窗口 672 / 最小历史 96 / MAD 6 规则。若第三个参数不是
+    映射，则将其视为 ``origins``。
     """
 
     if preprocessing is not None and not isinstance(preprocessing, Mapping):
@@ -790,7 +792,7 @@ def prepare_submission_sources(
     if hampel_mad_threshold <= 0.0:
         raise ValueError("Hampel MAD 阈值必须为正数")
     min_periods = (
-        max(4, hampel_window // 4) if hampel_min_periods is None else int(hampel_min_periods)
+        96 if hampel_min_periods is None else int(hampel_min_periods)
     )
     if min_periods <= 0 or min_periods > hampel_window:
         raise ValueError("Hampel 最小历史点数必须位于窗口范围内")
@@ -1358,6 +1360,85 @@ def prepare_reference_submission_input(
     report = dict(report)
     report["production_eligible"] = False
     report["reason"] = "Q_REFERENCE 仅归一化冻结输入副本，不拟合或改写模型输入"
+    return normalized, report
+
+
+def prepare_exact_reference_input(
+    training_raw: pd.DataFrame,
+    scoring_raw: pd.DataFrame,
+    origins: pd.DatetimeIndex | Sequence[object],
+    training_features: pd.DataFrame,
+    scoring_features: pd.DataFrame,
+    *,
+    history_points: int = 672,
+    hampel_window: int = 672,
+    hampel_mad_threshold: float = 6.0,
+    hampel_min_periods: int | None = None,
+    settings: ReferenceNormalizationSettings | Mapping[str, Any] | None = None,
+) -> tuple[pd.DataFrame, dict[str, object]]:
+    """按参考仓库完整语义构造 ``input.csv``（R1 Exact Reference Input Clone）。
+
+    顺序与 ``diaofenyuan/aic-gangtie`` 的 ``predict_pipeline`` 一致：
+
+    1. :func:`prepare_submission_sources`：从官方评分原始字段出发，训练期判定
+       invalid 列，Hampel 672/96/6 + median 兜底 + 无限制 ffill 修复；
+    2. :func:`sanitize_submission_features`：训练期拟合 all-nonfinite /
+       constant / duplicate / median schema，评分期只套用；
+    3. ``pd.concat([repaired_raw, sanitized_features], axis=1)``；
+    4. :func:`normalize_submission_input_frame`：全矩阵 IQR/Z-score 归一化。
+
+    本链只构造提交副本，绝不回流模型预测；``training_raw``/``scoring_raw``
+    应来自 :func:`gas_forecast.data.load_original_input_frame`，特征帧应只保留
+    ``feat_`` 前缀列（与参考仓库的纯工程特征语义一致）。
+    """
+
+    repaired_raw, raw_report = prepare_submission_sources(
+        training_raw,
+        scoring_raw,
+        origins=origins,
+        history_points=history_points,
+        hampel_window=hampel_window,
+        hampel_mad_threshold=hampel_mad_threshold,
+        hampel_min_periods=hampel_min_periods,
+    )
+    sanitized, feature_report = sanitize_submission_features(
+        training_features,
+        scoring_features,
+    )
+    # 参考语义要求评分特征与修复后的 raw sources 都对齐到 origins。
+    sanitized = sanitized.reindex(repaired_raw.index)
+    if sanitized.isna().any().any():
+        raise ValueError("评分工程特征未覆盖全部预测起点")
+    combined = pd.concat([repaired_raw, sanitized], axis=1)
+    if combined.index.has_duplicates:
+        raise ValueError("R1 拼接后的提交帧时间戳不唯一")
+    combined.index.name = "datetime"
+    combined = combined.reset_index(names="datetime")
+    if not np.isfinite(combined.drop(columns="datetime").to_numpy(dtype=float)).all():
+        raise ValueError("R1 拼接后的提交帧仍包含 NaN/Inf")
+
+    normalized, matrix_report = normalize_submission_input_frame(combined, settings)
+
+    report: dict[str, object] = {
+        "mode": Q_REFERENCE,
+        "reference_only": True,
+        "feeds_model": False,
+        "pipeline": "exact_reference_clone_v1",
+        "production_eligible": False,
+        "reason": "R1 仅构造最终 input.csv 提交副本，不回流模型预测",
+        "raw_sources": raw_report,
+        "feature_sanitize": feature_report,
+        "concat": {
+            "rows": int(len(combined)),
+            "raw_columns": list(repaired_raw.columns),
+            "raw_column_count": int(len(repaired_raw.columns)),
+            "feature_columns": list(sanitized.columns),
+            "feature_column_count": int(len(sanitized.columns)),
+            "input_columns_excluding_datetime": int(len(combined.columns) - 1),
+        },
+        "matrix_normalization": matrix_report,
+        "final_quality": matrix_report["final_quality"],
+    }
     return normalized, report
 
 

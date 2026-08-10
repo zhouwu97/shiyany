@@ -1,5 +1,45 @@
 # 决策记录
 
+## 2026-08-10 R1 Exact Reference Input Clone
+
+- 目标：把 `diaofenyuan/aic-gangtie` 从官方评分原表到最终 `input.csv` 的完整
+  构造语义一层不漏地复刻（除项目字段映射外）。此前只复刻了最后一层全矩阵
+  Q_REFERENCE 归一化，input 构造仍走 21 列 allowlist 的 Q_CAUSAL 路径；R1
+  补齐整条参考链：raw 加载（官方原表全列，无 allowlist）→
+  `prepare_submission_sources`（Hampel 672/96/6 + median + 无限制 ffill）→
+  特征 sanitize（训练期 fit all-nonfinite/constant/duplicate/median，评分期
+  只套 schema）→ `concat(raw sources, sanitized features)` → 全矩阵 Q_REFERENCE。
+- 参数修正：`CausalSourceSettings.hampel_min_periods` 与
+  `prepare_submission_sources` 的默认值由 168 改为 96，与参考仓库
+  `official_preliminary.yaml` 的 `min_periods: 96` 完全一致；`history_points=672`、
+  Hampel 窗口 672、MAD 6、replace median、ffill limit None 已确认一致。
+- 新增 `gas_forecast.data.load_original_input_frame`（四表 outer join、保留
+  全列、不建网格、不删全空列）与 `submission_quality.prepare_exact_reference_input`
+  （R1 完整链）；新增 `scripts/run_r1_exact_reference_input.py` 编排 R0/R1 两包。
+- R1 与预测物理分家：R0/R1 共享同一冻结 `s_result.csv`（SHA256
+  `e0f471d873…` 四处字节一致），只有 `input.csv` 不同；R1 链只构造提交副本，
+  绝不回流模型预测。
+- 真实运行产物 `results/raw/runs/experiments/r1_exact_reference_input_20260810/`，
+  状态 `LEGAL_R1_READY_FOR_PLATFORM`。审计对比：
+  | 检查 | R0 (Q5 等价) | R1 (Exact Clone) |
+  | --- | --- | --- |
+  | raw columns | 21 | 22 |
+  | feature columns | 534 | 568 |
+  | all nonfinite | 0 | 0 |
+  | constant columns | 0 | 0 |
+  | duplicate columns | 0 | 0 |
+  | IQR outlier (linear) | 0 | 0 |
+  | IQR outlier (all 5) | 0 | 0 |
+  | abs Z > 3 | 0 | 0 |
+  | residual dropped | 6 | 4 |
+  | repaired cells | 2338 | 3377 |
+- R1 终态全零门禁通过：nonfinite=0、constant=[]、duplicate=[]、IQR(五法)=0、
+  Z>3=0。R1 raw 列由训练期动态判定（25 列进入 concat，其中评分期常数列
+  `air_heater_5`/`converter_user1`/`into_gas_mixed_blast_furnace` 被全矩阵
+  drop-constant 删除，最终 22 列）。
+- 未上传、未推送、未写入 `results/best` 或 `提交这个*`；平台得分仍为 null。
+  建议消耗一次平台提交验证 R1（40→45 或 40→50 未知）。
+
 ## 2026-08-09 X0 P3 Oracle Ceiling Audit（诊断结论，不晋级）
 
 - 新增 `code/gas_forecast/oracle_ceiling.py` + `scripts/run_oracle_ceiling.py` +

@@ -26,6 +26,7 @@ from gas_forecast.submission_quality import (
     fit_quality_policy,
     inspect_submission_input_quality,
     normalize_submission_input_frame,
+    prepare_exact_reference_input,
     prepare_full_matrix_submission_input,
     prepare_submission_input,
     prepare_submission_sources,
@@ -287,7 +288,7 @@ def test_prepare_submission_sources_is_causal_and_uses_reference_history_policy(
         "history_points": 672,
         "hampel_window": 672,
         "hampel_mad_threshold": 6.0,
-        "hampel_min_periods": 168,
+        "hampel_min_periods": 96,
     }
     assert report["history_rows"] == 672
     assert report["invalid_columns"] == ["empty"]
@@ -378,3 +379,104 @@ def test_reference_normalization_uses_all_quantiles_converges_and_proves_termina
     assert final_quality["iqr_outlier_cells_all_methods"] == 0
     assert final_quality["zscore_outlier_cells"] == 0
     json.dumps(report, ensure_ascii=False)
+
+
+def test_prepare_exact_reference_input_clones_reference_pipeline_semantics() -> None:
+    """R1 完整链：动态 raw + Hampel 96 + 特征 sanitize + concat + 全矩阵归一化。"""
+
+    train_index = _timestamps("2025-01-01", 700)
+    score_index = _timestamps("2025-05-01", 8)
+    training_raw = pd.DataFrame(
+        {
+            "signal": 100.0 + np.sin(np.arange(len(train_index))),
+            "sparse": np.where(np.arange(len(train_index)) % 7 == 0, 50.0, np.nan),
+            "empty": np.nan,
+        },
+        index=train_index,
+    )
+    scoring_raw = pd.DataFrame(
+        {
+            "signal": [np.nan, 10_000.0, 101.0, np.nan, 98.0, 102.0, 101.5, 99.0],
+            "sparse": [np.nan] * 8,
+            "empty": [np.nan] * 8,
+        },
+        index=score_index,
+    )
+    training_features = pd.DataFrame(
+        {
+            "feat_keep": 100.0 + np.cos(np.arange(len(train_index))),
+            "feat_duplicate": 100.0 + np.cos(np.arange(len(train_index))),
+            "feat_constant": 1.0,
+            "feat_empty": np.nan,
+        },
+        index=train_index,
+    )
+    scoring_features = pd.DataFrame(
+        {
+            "feat_keep": [np.nan, 50.0, 100.5, np.nan, 99.0, 100.0, 98.5, 101.0],
+            "feat_duplicate": [-100.0, 100.0, 100.5, 99.0, 98.0, 97.0, 96.0, 95.0],
+            "feat_new": [9.0] * 8,
+        },
+        index=score_index,
+    )
+    origins = score_index
+
+    normalized, report = prepare_exact_reference_input(
+        training_raw,
+        scoring_raw,
+        origins,
+        training_features,
+        scoring_features,
+    )
+
+    assert report["pipeline"] == "exact_reference_clone_v1"
+    assert report["mode"] == Q_REFERENCE
+    assert report["reference_only"] is True
+    assert report["feeds_model"] is False
+    # raw 列由训练期动态判定：signal 保留、sparse 有有效值保留、empty 全缺失剔除。
+    assert report["concat"]["raw_columns"] == ["signal", "sparse"]
+    assert report["raw_sources"]["invalid_columns"] == ["empty"]
+    assert report["raw_sources"]["settings"]["hampel_min_periods"] == 96
+    # 特征 schema 由训练期冻结：feat_keep 保留，其余剔除。
+    assert report["concat"]["feature_columns"] == ["feat_keep"]
+    assert report["feature_sanitize"]["all_nonfinite"] == ["feat_empty"]
+    assert report["feature_sanitize"]["constant"] == ["feat_constant"]
+    assert report["feature_sanitize"]["duplicate"] == ["feat_duplicate"]
+    # 输出与参考一致：datetime 首列，raw 在前、features 在后。
+    # sparse 在训练期有有效值故保留为 raw 列，但评分期修复后为常数，
+    # 按参考全矩阵 drop_constant 语义被删除。
+    assert report["concat"]["raw_columns"] == ["signal", "sparse"]
+    assert "sparse" in report["matrix_normalization"]["dropped_constant_columns_before_winsor"]
+    assert list(normalized.columns) == ["datetime", "signal", "feat_keep"]
+    assert len(normalized) == 8
+    assert normalized["datetime"].tolist() == [pd.Timestamp(value) for value in origins]
+    assert np.isfinite(normalized.iloc[:, 1:].to_numpy(dtype=float)).all()
+    # 终态门禁。
+    final_quality = report["final_quality"]
+    assert final_quality["nonfinite_cells"] == 0
+    assert final_quality["constant_columns"] == []
+    assert final_quality["duplicate_columns"] == []
+    assert final_quality["iqr_outlier_cells_all_methods"] == 0
+    assert final_quality["zscore_outlier_cells"] == 0
+    json.dumps(report, ensure_ascii=False)
+
+
+def test_prepare_exact_reference_input_rejects_missing_feature_origins() -> None:
+    train_index = _timestamps("2025-01-01", 700)
+    score_index = _timestamps("2025-05-01", 4)
+    training_raw = pd.DataFrame({"signal": 100.0}, index=train_index)
+    scoring_raw = pd.DataFrame({"signal": 100.0}, index=score_index)
+    training_features = pd.DataFrame({"feat_a": 1.0 + np.arange(len(train_index))}, index=train_index)
+    # 评分特征只覆盖前 2 个 origin，未覆盖全部起点。
+    scoring_features = pd.DataFrame(
+        {"feat_a": 1.0}, index=score_index[:2]
+    )
+
+    with pytest.raises(ValueError, match="评分工程特征未覆盖全部预测起点"):
+        prepare_exact_reference_input(
+            training_raw,
+            scoring_raw,
+            score_index,
+            training_features,
+            scoring_features,
+        )

@@ -166,6 +166,40 @@ def align_tables(data_dir: str | Path, frequency: str = "15min") -> AlignedDatas
     return AlignedDataset(frame=aligned, audit=audit)
 
 
+def load_original_input_frame(data_dir: str | Path) -> pd.DataFrame:
+    """按官方原名加载全部原始输入表，不做网格重排、不删除全空列。
+
+    语义与参考仓库 ``load_original_input_frame`` 一致：四张官方表按时间戳
+    outer join，保留全部原始字段，供 R1 参考输入克隆链使用。与
+    :func:`align_tables` 不同，这里不添加 ``feat_missing_row_*`` 标记列，
+    也不删除结构空列；训练期是否判 invalid 由
+    ``prepare_submission_sources`` 的因果规则决定。
+    """
+
+    paths = discover_tables(data_dir)
+    frames: list[pd.DataFrame] = []
+    seen_columns: set[str] = set()
+    for name in TABLE_ORDER:
+        path = paths.get(name)
+        if path is None:
+            continue
+        table, duplicates, invalid = read_timeseries(path)
+        if invalid:
+            raise DataContractError(f"{path.name} 含 {invalid} 个非法时间戳")
+        collisions = seen_columns.intersection(table.columns)
+        if collisions:
+            raise DataContractError(f"跨表字段重名: {sorted(collisions)}")
+        seen_columns.update(table.columns)
+        frames.append(table)
+    if not frames:
+        raise DataContractError("没有可加载的官方原始输入表")
+    combined = pd.concat(frames, axis=1, join="outer").sort_index(kind="stable")
+    if combined.index.has_duplicates:
+        raise DataContractError("原始输入表拼接后时间戳不唯一")
+    combined.index.name = "datetime"
+    return combined
+
+
 def combine_context(
     train: pd.DataFrame,
     test: pd.DataFrame,
