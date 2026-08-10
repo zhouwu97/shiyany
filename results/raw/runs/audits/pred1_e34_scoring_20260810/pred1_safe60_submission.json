@@ -1,0 +1,13 @@
+{
+  "package": "E:\\AI\\shiyan\\results\\raw\\runs\\audits\\pred1_e34_scoring_20260810\\pred1_safe60_submission.zip",
+  "members": [
+    "input.csv",
+    "s_result.csv"
+  ],
+  "input_sha256": "23330d3cfdb68618e2f878cb4325e3e121ea7d741941ca73f8d6b363ba230aef",
+  "s_result_sha256": "a73ded1812eb223a156870eee62affbdc2b25df0335443b08ac838bf24a32284",
+  "zip_sha256": "3e8993d76baa16e6a62515ddb556170fcf93bfb43651c6da5a543c71df0a6fb6",
+  "input_source": "E:\\AI\\shiyan\\results\\raw\\runs\\experiments\\r1_exact_reference_input_20260810_final\\R1_EXACT_REFERENCE_CLONE\\input.csv",
+  "s_result_source": "E:\\AI\\shiyan\\results\\raw\\runs\\audits\\pred1_e34_scoring_20260810\\s_result_safe60.csv",
+  "note": "input.csv 为平台已验证 50/50 的冻结 R1 输入，字节级未改"
+}

@@ -1,5 +1,40 @@
 # 决策记录
 
+## 2026-08-10 PRED-1 平台验证：Success A PLATFORM_IMPROVEMENT_CONFIRMED
+
+- 平台对 `pred1_safe60_submission.zip` 真实打分：**quality 50.0/50（全细项满分）**、
+  **acc 42.3/50**、`1mape_1=0.9457`、`1mape_all=0.9581`。
+- 对照 PRED1_PLATFORM_BASELINE_V1（acc 42、g1 0.9448、gall 0.9546）：
+  - quality 保持 50/50（R1 input 未动，字节一致）；
+  - acc **42.0 → 42.3**（+0.3）；
+  - g1 1-MAPE **0.9448 → 0.9457**（MAPE 5.52% → 5.43%）；
+  - gall 1-MAPE **0.9546 → 0.9581**（MAPE 4.54% → 4.19%）。
+- **判定：Success A `PLATFORM_IMPROVEMENT_CONFIRMED`**（quality=50 且 acc>42）。
+- **转移验证**：gall 改善 0.35pp > g1 0.09pp，与 PRED-R0 transfer 分析一致
+  （SAFE60 优势集中在 gall）；OOF 0.096pp 优势真实迁移到平台。
+- **纪律**：平台结果只记录，不反向调权重/参数/阈值。SAFE60 0.60/0.40 保持冻结。
+- 状态：`PRED1_PLATFORM_VERIFIED_SAFE60_CONFIRMED`。
+- 下一步：按 Priority，PRED-3（matured residual, gall 主线）/ PRED-5（PCA trajectory）。
+
+## 2026-08-10 PRED-1 上传包冻结 + 3-origin 定向复核全绿（待平台上传）
+
+- 3-origin 定向复核（2025-05-02 10:15 g1、13:15 gall、21:45 g1）全 PASS：
+  1) 前向填充 provenance：3 个 origin 的 current 全部 = `< origin` 最近可见值
+     （10:00/13:00/21:30）；R1 重建值与之相同系 R1 当初亦用 LOCF，本链直接由
+     测试数据 ffill 计算、不读 R1。
+  2) 截断重放：full-context 全链预测 vs 冻结 s_result，repro_max = 5.7e-14。
+  3) 扰动不变：truncated/perturbed 三上下文 6/6 checks = 0.0~1.4e-14（全部 ≤1e-10）。
+  4) blind manifest：`blind_used_for_selection=false, confirmed_blind_oof_used_for_refit=true,
+     post_blind_tuning=false`（在 E3/E4 receipt）。
+  5) R1 input 冻结：SHA `23330d3c...`（平台已验证 50/50，字节级未改）。
+- **上传包冻结**：`results/raw/runs/audits/pred1_e34_scoring_20260810/pred1_safe60_submission.zip`
+  - input SHA `23330d3cfdb68618e2f878cb4325e3e121ea7d741941ca73f8d6b363ba230aef`
+  - s_result SHA `a73ded1812eb223a156870eee62affbdc2b25df0335443b08ac838bf24a32284`
+  - ZIP SHA `3e8993d76baa16e6a62515ddb556170fcf93bfb43651c6da5a543c71df0a6fb6`
+  - 两成员与冻结源字节一致；ZIP 只含 input.csv + s_result.csv。
+- **上传后只看四数**：quality 保持 50/50、1-MAPE_g1 > 0.9448、1-MAPE_gall > 0.9546、
+  acc > 42。平台结果只记录，不反向调权重/参数。
+
 ## 2026-08-10 Gate E 完整通过：SAFE60 production runner 全门禁绿（PRE-PRODUCTION → PRODUCTION-ELIGIBLE 就绪）
 
 - **E0 seed contract**：9/9 测试 PASS（replay=fold_position 0-18，production=slot 100，

@@ -1,0 +1,20 @@
+{
+  "stage": "final_verify_3origins",
+  "reproducible_vs_frozen_sresult_max_abs_diff": 5.684341886080802e-14,
+  "variants_max_abs_diff": {
+    "2025-05-02 10:15:00_truncated": 1.4210854715202004e-14,
+    "2025-05-02 10:15:00_perturbed": 1.4210854715202004e-14,
+    "2025-05-02 13:15:00_truncated": 0.0,
+    "2025-05-02 13:15:00_perturbed": 0.0,
+    "2025-05-02 21:45:00_truncated": 0.0,
+    "2025-05-02 21:45:00_perturbed": 0.0
+  },
+  "all_identical": true,
+  "missing_current_policy": "causal_forward_fill",
+  "target_origins": [
+    "2025-05-02 10:15:00",
+    "2025-05-02 13:15:00",
+    "2025-05-02 21:45:00"
+  ],
+  "acceptance": "all max_abs_diff <= 1e-10"
+}
