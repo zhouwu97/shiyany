@@ -1,0 +1,80 @@
+{
+  "anchor_mape": 0.05099519557251641,
+  "kinds": {
+    "ridge": {
+      "standalone_mape": 0.06418925522650047,
+      "anchor_mape": 0.05099519557251641,
+      "residual_corr_with_anchor": 0.7683867821816258,
+      "cells": 58368,
+      "blend0.05_mape": 0.050974218626899305,
+      "blend0.10_mape": 0.05105946676949655,
+      "blend0.15_mape": 0.051242051973902025
+    },
+    "et": {
+      "standalone_mape": 0.05226038485307412,
+      "anchor_mape": 0.05099519557251641,
+      "residual_corr_with_anchor": 0.9650994315147061,
+      "cells": 58368,
+      "blend0.05_mape": 0.05094263643888251,
+      "blend0.10_mape": 0.05090348379413871,
+      "blend0.15_mape": 0.050878724610972724
+    },
+    "pca_2_ridge": {
+      "standalone_mape": 0.06404352907173531,
+      "anchor_mape": 0.05099519557251641,
+      "residual_corr_with_anchor": 0.769526036037702,
+      "cells": 58368,
+      "blend0.05_mape": 0.05098271658703977,
+      "blend0.10_mape": 0.05107443228263708,
+      "blend0.15_mape": 0.05126277670274536
+    },
+    "pca_3_ridge": {
+      "standalone_mape": 0.06416501344830607,
+      "anchor_mape": 0.05099519557251641,
+      "residual_corr_with_anchor": 0.7689343457969027,
+      "cells": 58368,
+      "blend0.05_mape": 0.050981442737794945,
+      "blend0.10_mape": 0.05107305289112077,
+      "blend0.15_mape": 0.05126093170889701
+    },
+    "pca_4_ridge": {
+      "standalone_mape": 0.06416000647857277,
+      "anchor_mape": 0.05099519557251641,
+      "residual_corr_with_anchor": 0.7687522644452567,
+      "cells": 58368,
+      "blend0.05_mape": 0.05097940694894635,
+      "blend0.10_mape": 0.0510691542829332,
+      "blend0.15_mape": 0.05125540764361896
+    },
+    "pca_3_cat": {
+      "standalone_mape": 0.052550637661986595,
+      "anchor_mape": 0.05099519557251641,
+      "residual_corr_with_anchor": 0.9697835561840145,
+      "cells": 58368,
+      "blend0.05_mape": 0.05095626495018022,
+      "blend0.10_mape": 0.050931939809968185,
+      "blend0.15_mape": 0.050921843475402094
+    }
+  },
+  "folds": [
+    "dev_01",
+    "dev_02",
+    "dev_03",
+    "dev_04",
+    "dev_05",
+    "dev_06",
+    "dev_07",
+    "dev_08",
+    "dev_09",
+    "dev_10",
+    "dev_11",
+    "dev_12",
+    "dev_13",
+    "dev_14",
+    "dev_15",
+    "dev_16",
+    "dev_17",
+    "dev_18",
+    "dev_19"
+  ]
+}

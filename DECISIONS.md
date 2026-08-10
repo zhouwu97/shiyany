@@ -1,5 +1,45 @@
 # 决策记录
 
+## 2026-08-10 PRED-5 PCA/MultiOutput Trajectory：STOP（核心假设未兑现，诚实负结果）
+
+- 8 步 delta 轨迹，严格 forward 19 折，6 主实验（≤6 网格）：MultiOutput
+  Ridge/ExtraTrees + PCA(2/3/4)×Ridge/CatBoost。SAFE60 为锚（pooled 5.0995）。
+
+| kind | standalone | residual corr | blend05/10 |
+| --- | --- | --- | --- |
+| ridge | +1.32pp | 0.768 | 0.0510/0.0511 |
+| ExtraTrees | +0.13pp | 0.965 | 0.0509/0.0509 |
+| pca_2/3/4_ridge | ~+1.3pp | ~0.77 | 0.0510/0.0511 |
+| pca_3_cat | +0.16pp | 0.970 | 0.0510/0.0509 |
+
+- **判定：STOP**。三条保留规则全不满足：
+  1) standalone 超 +0.15pp（ridge/pca 远超；et +0.13pp 勉强但 corr 不过）；
+  2) 残差相关 0.77–0.97 **太高**（trajectory 与 SAFE60 误差结构重合，无新多样性）；
+  3) 5–15% blend 无稳定改善（净 ≈ 0）。
+- **结论**：共享低维 trajectory 假设未产生新残差结构——SAFE60（=0.6X3+0.4A61）
+  已捕获 delta 轨迹的绝大部分信号。与 A57a（horizon 独立）不同，这次是
+  "shared trajectory" 方向也失败，进一步确认现有模型族对轨迹信号的覆盖接近饱和。
+- 不扩大网格（PCA 上限 6 主实验已守）。不保留 specialist（corr 过高无多样价值）。
+- 下一步候选：PRED-6（target joint structure）或 PRED-7（小型 TCN），或回归
+  PRED-R0/R1（regime-conditional）——均为低优先级/投机，需重新预注册。
+
+## 2026-08-10 PRED-3 Matured Residual Calibration：STOP（未达 gate，诚实负结果）
+
+- SAFE60 为锚，严格 forward 评估多路残差校准：
+  - EWMA 全量修正（λ=1）：pooled **−1.41pp**（EWMA 短期噪声不可榨）。
+  - λ 收缩（0.10/0.20）：**−0.01pp / −0.055pp**（仍负）。
+  - 每 (target×horizon) 常数偏差修正（λ=0.5，全历史）：pooled **+0.008pp**、
+    HIGH_STABLE hard +0.0104pp、regime-weighted **+0.0178pp**，但 **recent5 2/5、
+    fold 8/19**（近期折反转）。
+  - per-target bias / 近 5/3 折 bias 变体：+0.004pp ~ −0.010pp，均更弱。
+- **系统性偏差存在**（SAFE60 低估：g1 +0.26、gall +1.02，随 horizon 增大），
+  但校正量级 < 0.01pp 且 fold 不稳定。
+- **判定：STOP**。pooled +0.008pp 低于生产 bar（≥0.01pp），recent5 2/5 明确反转
+  （用户规则：recent folds 不反转才生产化）。不生产、不调 λ/窗口继续磨。
+- 残差 bias 特征（每 target×horizon 常数偏差）保留为 PRED-4 的候选特征（PRED-4
+  需 PRED-2 probe 通过后才启动）。
+- 下一步：转 **PRED-5 PCA/MultiOutput trajectory**（第二增益源）。
+
 ## 2026-08-10 PRED-1 平台验证：Success A PLATFORM_IMPROVEMENT_CONFIRMED
 
 - 平台对 `pred1_safe60_submission.zip` 真实打分：**quality 50.0/50（全细项满分）**、
