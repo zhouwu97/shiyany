@@ -1,0 +1,41 @@
+{
+ "receipt_id": "PRED1_PLATFORM_BASELINE",
+ "date_recorded": "2026-08-10",
+ "note": "真实平台反馈。只作记录，禁止用于调 X3 权重 / CatBoost 参数 / router threshold / PCA components，否则平台退化为 validation set。",
+ "submission": {
+  "zip": "E:\\AI\\shiyan\\results\\raw\\runs\\experiments\\r1_exact_reference_input_20260810_final\\R1_EXACT_REFERENCE.zip",
+  "s_result_sha256": "e0f471d873d67c18949ae57e2ca6046938ed1a49a560bf54c11d5a646ba747b2",
+  "prediction_source": "aggressive_r75_lgb20 (production champion, trained 20260802)",
+  "archive_sha256": "e03e70393087ec14e3a0288949980cb07cfa319685573840e62dd4b43b923452",
+  "r1_chain": "source_sha256 == R0_sha256 == R1_sha256 == zip_member, all byte-identical"
+ },
+ "platform_results": {
+  "input_quality": 50.0,
+  "input_quality_detail": {
+   "miss": "10/10",
+   "dup": "5/5",
+   "out": "5/5",
+   "intv": "5/5",
+   "invalid_col": "5/5",
+   "feat": "5/5",
+   "comp": "15/15"
+  },
+  "input_status": "PLATFORM_VERIFIED_50_OF_50",
+  "prediction_acc": 42.0,
+  "generator_1": {"one_minus_mape": 0.9448, "mape": 0.0552},
+  "generator_all": {"one_minus_mape": 0.9546, "mape": 0.0454},
+  "simple_avg_mape": 0.0503
+ },
+ "calibration_lessons": [
+  "取消任何 MAPE->50 分线性换算（50*0.95=47.5 与平台 42/50 不符）。",
+  "不把估算平台分写进研发 gate；阶段目标统一用 MAPE。",
+  "本地 3000-cell diagnostic 与平台 g1 差 0.043pp / gall 差 0.038pp，可作为 blind-independent sanity check，但禁止反推最后 72 单元标签。"
+ ],
+ "prd1_implications": {
+  "promotion_rule": "PRED-1 全部合法门禁通过后只上传一次；只看新 1-MAPE 是否改善，不拿平台调模型。",
+  "case_A": "quality=50 and acc>42 -> X3_SAFE60=PLATFORM_CHAMPION",
+  "case_B": "quality=50 and acc=42 但 1-MAPE 提升 -> 仍为预测 champion（平台离散/映射效应）",
+  "case_C": "quality=50 and acc=42 且 1-MAPE 基本不变 -> 停止调 SAFE60，转 PRED-3/PRED-5",
+  "case_D": "1-MAPE 明显变差 -> 调查 production replay / schema / retrain / feature semantics，禁止改权重重试上传"
+ }
+}

@@ -1,0 +1,107 @@
+{
+ "linear_identity_max_abs_diff": 0.0,
+ "pooled_mape": {
+  "x3": 5.119696,
+  "a61": 5.195745,
+  "safe60": 5.09952,
+  "aggressive": 5.229437
+ },
+ "improvement_vs_a61_pp": 0.096225,
+ "improvement_vs_aggressive_pp": 0.129917,
+ "fold_wins_safe60_vs_a61": 19,
+ "fold_wins_safe60_vs_aggressive": 17,
+ "recent5_wins_safe60_vs_a61": 5,
+ "worst_fold_regression_vs_a61_pp": -0.001616,
+ "worst_fold_regression_vs_aggressive_pp": 0.042613,
+ "target_mape": {
+  "a61": {
+   "generator_1": 6.045583,
+   "generator_all": 4.345907
+  },
+  "safe60": {
+   "generator_1": 5.973644,
+   "generator_all": 4.225395
+  },
+  "aggressive": {
+   "generator_1": 6.082758,
+   "generator_all": 4.376116
+  }
+ },
+ "bootstrap_vs_a61": {
+  "block": "day",
+  "blocks": 38,
+  "samples": 5000,
+  "random_seed": 20260810,
+  "mean_improvement_pp": 0.0965864039594185,
+  "median_improvement_pp": 0.09648997648994788,
+  "ci95_low_pp": 0.05888058608191206,
+  "ci95_high_pp": 0.13251083601721136,
+  "probability_candidate_better": 1.0,
+  "observed_improvement_pp": 0.09622536537765777
+ },
+ "bootstrap_vs_aggressive": {
+  "block": "day",
+  "blocks": 38,
+  "samples": 5000,
+  "random_seed": 20260810,
+  "mean_improvement_pp": 0.1302089155156915,
+  "median_improvement_pp": 0.13061084417087426,
+  "ci95_low_pp": 0.08952677393759562,
+  "ci95_high_pp": 0.1690179617265741,
+  "probability_candidate_better": 1.0,
+  "observed_improvement_pp": 0.1299174415192797
+ },
+ "recent5": {
+  "folds": [
+   "dev_15",
+   "dev_16",
+   "dev_17",
+   "dev_18",
+   "dev_19"
+  ],
+  "pooled_vs_a61_pp": 0.086544
+ },
+ "folds": [
+  "dev_01",
+  "dev_02",
+  "dev_03",
+  "dev_04",
+  "dev_05",
+  "dev_06",
+  "dev_07",
+  "dev_08",
+  "dev_09",
+  "dev_10",
+  "dev_11",
+  "dev_12",
+  "dev_13",
+  "dev_14",
+  "dev_15",
+  "dev_16",
+  "dev_17",
+  "dev_18",
+  "dev_19"
+ ],
+ "bootstrap_spec": {
+  "block": "day",
+  "samples": 5000,
+  "random_seed": 20260810
+ },
+ "merge_audit": {
+  "x3_rows": 58368,
+  "a61_rows": 58368,
+  "merged_rows": 58368,
+  "actual_identical": true
+ },
+ "gate_criteria": {
+  "reproduce_x3_pooled": "5.119696 +/- 0.005pp",
+  "reproduce_a61_pooled": "5.195745 +/- 0.005pp",
+  "reproduce_safe60_pooled": "5.099520 +/- 0.005pp",
+  "vs_a61_min_improvement_pp": 0.05,
+  "vs_aggressive_min_improvement_pp": 0.02,
+  "bootstrap_probability_better_min": 0.95,
+  "worst_fold_regression_max_pp": 0.1,
+  "recent5_wins_min": "3/5",
+  "future_diff": "exact zero"
+ }
+}

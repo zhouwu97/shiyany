@@ -1,5 +1,159 @@
 # 决策记录
 
+## 2026-08-10 SAFE60 development 定义永久冻结（DEV-ELIGIBLE / PRE-PRODUCTION）
+
+- 基于 B1/B2/C/D 四重 PASS（X3/A61 逐字节 replay、SAFE60 5.099520 精确复现、
+  P=1.0、19/19 fold、regime-weighted +0.0828pp/P=0.9998），SAFE60 development 定义
+  **永久冻结**：`safe60 = 0.60×X3_cat_mae + 0.40×A61_recursive_blend_05`，
+  状态升级为 `DEV-ELIGIBLE`（等待 Production Gate E），**不是** production champion。
+- **Gate E 失败归因规则（写死）**：Gate E 失败只能说明 production implementation /
+  replay semantics 有问题，不是 development model 有问题。Gate E 失败时**禁止**：
+  `0.60→0.65` 调权重、换 seed 重试、重新调 CatBoost 参数、改 A61 参数。
+- **Seed contract（Gate E 预注册）**：
+  - `mode=replay`：`seed_offset = frozen_fold_position×1000 + target_idx×100 + horizon_idx`，
+    cutoff 必须精确匹配某 dev fold 的 train_end；用途 = OOF reproduction。
+  - `mode=production`：冻结 `PRODUCTION_SEED_SLOT = 100`（独立命名空间，不复用任何
+    fold position 0–18），`seed_offset = 100×1000 + target_idx×100 + horizon_idx`。
+  - **seed 是工程确定性参数，不是超参：Gate E 内禁止任何 seed 扫描（含跑
+    18/19/100 看哪个好）。**
+  - 确定性层（ARX / Ridge / 线性）不人为塞随机种子。
+  - 该 contract 对所有依赖 fold_position 的随机 learner 统一生效。
+- 提交切点：本 commit 冻结 dev-side 全部证据；Gate E 从干净 HEAD 单独形成第二个
+  milestone。
+
+## 2026-08-10 PRED-1 v4.1 regime 三口径报告：SAFE60 全口径胜出（Gate C/D 完整通过）
+
+- PRED-R0 harness 在重放 SAFE60 合并帧上输出三口径（阈值只在 `< dev_01` 冻结：
+  bf_total_hi 1,682,755 / ramp_lo 0.0433；density 模型也只 fit `< dev_01`）。
+  temporal_support OK（matched_days=37、day_ESS=23.6≥5、cell_ESS 15,522）。
+
+| 候选 | full dev | regime hard | regime weighted |
+| --- | --- | --- | --- |
+| SAFE60 | 5.0995 | 4.9306 | **4.9110** |
+| A61 | 5.1957 | 5.0002 | 4.9932 |
+| aggressive | 5.2294 | 5.0533 | 5.0338 |
+
+- 主口径 weighted bootstrap：SAFE60 vs A61 = **+0.0828pp（P=0.9998）**；vs aggressive =
+  **+0.1236pp（P=1.0）**。三个口径均无结构退化（无回归，不触发 robustness cap）。
+- **结论：SAFE60 5.099520% 在 full / regime-hard / regime-weighted 三个口径全部为正且
+  bootstrap P≥0.95，满足 v4.1 §4 主 gate（full dev）+ robustness（regime）双重判据。
+  Gate C/D 完整通过。** 之前担心的"评分子分布上收益消失"未发生——proper 密度加权下
+  收益从 0.096pp 缩至 0.083pp（vs A61），仍然稳健正。
+- 产物：`results/raw/runs/audits/pred1_gate_c_20260810/regime_report/`。
+- 下一步：Gate E final fit once + production replay + future perturb。
+
+## 2026-08-10 PRED-1 Gate C/D SAFE60 Replay：PASS（三基线全绿）
+
+- 用重放 X3 OOF + 重放 A61 OOF 实时构造 `safe60 = 0.60×X3 + 0.40×A61`（线性恒等
+  max_abs_diff=0.0），不读外部 blend 列。结果与冻结 `.tmp/pred1_gate_c_frozen_validation.json`
+  **完全一致**：
+
+| 判据 | 要求 | 实测 |
+| --- | --- | --- |
+| SAFE60 pooled | 5.099520 ±0.005pp | **5.099520** |
+| vs A61 | ≥0.050pp | +0.0962pp |
+| vs aggressive | ≥0.020pp | +0.1299pp |
+| bootstrap P | ≥0.95 | **1.0 / 1.0** |
+| fold 胜 A61 / aggressive | — | 19/19, 17/19 |
+| recent5 vs A61 | ≥3/5 | 5/5 |
+| worst fold regr vs A61 | ≤0.100pp | **−0.0016pp**（无折退化） |
+| 两 target | 均改善 | g1 5.9736 vs 6.0456, gall 4.2254 vs 4.3459 |
+
+- **结论：SAFE60 5.099520% 在 main-repo replay 链上成立，Gate C/D 通过**。研究基线
+  （A61）与 promotion 基线（aggressive dev-contract 5.229437）双口径均显著胜出。
+- 产物：`results/raw/runs/audits/pred1_gate_c_20260810/`（safe60_gate_report.json、
+  merged_safe60_eval.csv）。
+- 下一步：v4.1 regime 三口径报告（PRED-R0 harness，运行中）→ Gate E final fit once +
+  production replay + future perturb。
+
+## 2026-08-10 PRED-1 Gate B2 A61 Fold Replay：PASS（逐字节复现）
+
+- 主仓 `scripts/run_recursive_arx_diversity.py` + `code/gas_forecast/recursive_arx.py`
+  以 A60 verification OOF 为父输入、冻结 config（hash 160fa9f4…）重跑 A61，输出与
+  冻结 `a61_recursive_arx_diversity_verification_20260804` OOF **逐字节一致**：
+  pooled `5.195745%`、g1 `6.045583%`、gall `4.345907%`、19 折全部 diff =
+  0.000000pp；OOF SHA256 `A5887C57…` 与 DECISIONS 记录完全一致。
+- **结论：A61 production-capable runner 语义成立**（此前 manifest git_commit 不可靠
+  问题不影响 OOF 复现；HEAD 代码即最终判据）。Gate B2 通过。
+- 产物：`results/raw/runs/experiments/pred1_a61_replay_20260810/`。
+- 下一步：Gate C SAFE60 Replay + 双 baseline + bootstrap（运行中）。
+
+## 2026-08-10 PRED-1 Gate B1 X3 Fold Replay：PASS（逐字节复现）
+
+- 主仓 `scripts/run_mape_aligned.py` + `code/gas_forecast/mape_aligned.py` 在冻结
+  `x3_config.json`（CatBoost MAE / 100 iter / depth 6 / lr 0.05 / has_time / seed
+  20250731+offset）上重跑 19 折，输出与 worktree
+  `20260809_233810_677` 冻结 OOF **逐字节一致**：pooled `5.119696%`、
+  g1 `6.005004%`、gall `4.234387%`、19 折全部 diff = 0.000000pp；OOF 文件
+  SHA256 `bc2718e4…` 完全相同。replay 状态 `RETAIN_MAPE_ALIGNED`、
+  248 列、912 训练记录、label_maturity PASS、future perturb 12/12。
+- **结论：X3 5.119696% 可复现性彻底确认**（此前 asset audit 标记的无模型文件、
+  manifest git_commit 不可靠问题均不影响 OOF 复现）。Gate B1 通过，容差远优于
+  ±0.005pp 要求。
+- 产物：`results/raw/runs/experiments/pred1_x3_replay_20260810/`。
+- 下一步：Gate B2 A61 Fold Replay（运行中）。
+
+## 2026-08-10 平台真实反馈：Input 50/50 + Prediction 42/50 基线登记
+
+- 平台对 `R1_EXACT_REFERENCE.zip` 真实打分：Input Quality **50/50**（miss
+  10/10、dup 5/5、out 5/5、intv 5/5、invalid_col 5/5、feat 5/5、comp 15/15），
+  Prediction Acc **42/50**。`s_result.csv` SHA256 `e0f471d873d67c1894...`
+  （= R1 final 链中 R1_EXACT_REFERENCE_CLONE/s_result.csv，字节级等于
+  aggressive_r75_lgb20 生产冻结预测）。→ R1 正式封版为
+  `PLATFORM_VERIFIED_INPUT_50_OF_50`，此后禁止再改 input。
+- 平台：g1 `1-MAPE=0.9448`（MAPE 5.52%）、gall `1-MAPE=0.9546`（MAPE 4.54%），
+  两目标简单平均 5.03%。本地 3000-cell diagnostic 与平台 g1 差 0.043pp /
+  gall 差 0.038pp → 本地诊断可作 blind-independent sanity check，但禁止反推
+  最后 72 单元标签。
+- **取消任何 MAPE→50 分线性换算**（50×0.95≈47.5 与平台 42/50 不符）。以后只
+  有两类数字：本地研发指标（MAPE/ΔMAPE/fold wins/bootstrap）与平台验证指标
+  （acc/1mape_1/1mape_all），绝不自行转换。
+- PRED-1 新增 `results/raw/runs/audits/pred1_asset_audit_20260810/PRED1_PLATFORM_BASELINE.json`
+  作为唯一 platform baseline receipt；只记录，禁止用于调 X3 权重 / CatBoost
+  参数 / router threshold / PCA components。PRED-1 成功标准：门禁全过后一次
+  上传，Case A acc>42 → PLATFORM_CHAMPION；Case B acc=42 但 1-MAPE 提升 → 仍
+  为预测 champion；Case C 1-MAPE 不变 → 停止调 SAFE60；Case D 明显变差 → 调查
+  链路，禁止改权重重试。
+- 优先级进一步明确：PRED-1 > PRED-3（matured residual，重点 g1 长周期）>
+  PRED-5（PCA trajectory，重点 g1）> PRED-2（廉价 probe）> PRED-4。
+
+## 2026-08-10 PRED-1 Gate A 资产核验完成（Asset Audit PASS）
+
+- 完成三项锁定并产出 `results/raw/runs/audits/pred1_asset_audit_20260810/`：
+  `PRED1_ASSET_AUDIT.json`、`x3_feature_schema.json`（248 列冻结）、
+  `PRED1_PLATFORM_BASELINE.json`、`x3_config.json`（X3 冻结配置）、
+  `scripts/pred1_check_x3_schema.py`（fail-closed 校验）。
+- **248 vs 249 已定案**：差异恰为一列 `feat_champion_prediction`（A51 同步长
+  Champion 预测，branch_prediction/disagreement 组）。X3 的 248 =
+  `_long_horizon_feature_candidates()`（不含 champion 列），A51 的 249 = 248 +
+  champion 列（仅 `include_champion_prediction=True` 时追加）。无需删列。
+- **X3 冻结身份已锁定**：experiment `20260809_233810_677`，git_commit 334318a，
+  19 folds × 192 origins × 16 cells = 58368 行；CatBoost MAE **100 iter / depth 6 /
+  lr 0.05 / has_time / seed 20250731+offset**（注意：计划正文写的 600 iter/lr 0.03
+  是通用 ForecastConfig 默认，非 X3 冻结参数）；parent = `a61_recursive_blend_05_pred`；
+  248 列 long_horizon；数据/特征/OOF 哈希全部落盘。**无任何模型文件**。
+- **aggressive 契约已定案**：aggressive 训练 OOF 是 blind+19dev 的 20 折混合，
+  results/best pooled 5.2666% 含 blind；但 dev 折预测与 X3 OOF 中
+  `aggressive_r75_lgb20_pred` 逐位一致（max diff 8.5e-14，0/58368 行不同）。
+  故 promotion 可直接在 SAFE60 19 折契约上比较：aggressive 5.229437% vs
+  SAFE60 5.099520%，改善 ≈ 0.1299pp。
+- **主仓可复现性已验证**：主仓 `align_tables` + `build_causal_features` 与 X3
+  实验产生相同 `data_hash`（d9e5115d…）与 `feature_schema_hash`（9aa17ad5…）；
+  `pred1_check_x3_schema.py` fail-closed PASS（生成 248 列 == 冻结 248 列，
+  schema SHA `2f8a050c…`）。A61 verification 的 feature_schema_hash 与 X3 相同，
+  证明两模型共用同一 248 列特征矩阵。
+- **资产迁移**：`code/gas_forecast/mape_aligned.py` + `scripts/run_mape_aligned.py`
+  从工作树迁入主仓（此前为 untracked，只存在于 `x3-mape-aligned` worktree）。
+  已校验与源文件逐字节一致。
+- **发现**：A61 实验 manifest 记录的 git_commit `8f53ba33` 处其实没有
+  `recursive_arx.py`（首现于 681c6f4），说明该 manifest 的 git_commit 不可靠；
+  recursive_arx.py 当时可能为 untracked。A61 replay 以 HEAD 代码能否复现冻结
+  OOF 为最终判据。
+- 下一关：Gate B1 X3 Fold Replay（进行中，容差 |pooled−5.119696|≤0.005pp）→
+  Gate B2 A61 Fold Replay → Gate C SAFE60 Replay + bootstrap + 双 baseline →
+  Gate D promotion vs aggressive → Gate E final fit once + production replay +
+  future perturb。
+
 ## 2026-08-10 X1 Dynamic Expected-Error Router（未晋级，诚实负结果）
 
 - 目标：在 X0 的 origin oracle `4.191370%` 空间上构建可部署动态路由：七候选

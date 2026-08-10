@@ -1,0 +1,28 @@
+{
+  "cutoff": "2025-03-20",
+  "fit_rows": 7488,
+  "gas_quantiles": [
+    0.75,
+    0.5,
+    0.25
+  ],
+  "ramp_quantiles": [
+    0.25,
+    0.75
+  ],
+  "thresholds": {
+    "bf_total_hi": 1682755.0375,
+    "bf_total_mid": 1646256.13,
+    "bf_total_lo": 1592112.8475000001,
+    "bf_ramp_lo": 0.04332344176409672,
+    "bf_ramp_hi": 0.0867338662424843
+  },
+  "density_features": [
+    "bf_total",
+    "bf_ramp_max",
+    "bf_slope8",
+    "bf_missing4"
+  ],
+  "regime_label": "HIGH_STABLE = HIGH gas & STABLE ramp",
+  "fit_spec_sha256": "54307254f3be240e096a32c74250c735872d987c3edd0c76fd71aebfaf5cf723"
+}
