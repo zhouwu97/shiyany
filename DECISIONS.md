@@ -1,5 +1,31 @@
 # 决策记录
 
+## 2026-08-10 X1 Dynamic Expected-Error Router（未晋级，诚实负结果）
+
+- 目标：在 X0 的 origin oracle `4.191370%` 空间上构建可部署动态路由：七候选
+  池（A61/P3/X3/A64/CausalRolling/Analog/Matured），每单元格训练
+  `expected_error_c(X_t, target, horizon)`，只用历史 cross-fit；置信度不足回
+  落 A61，置信度足够 soft blend top2。
+- 新增 `code/gas_forecast/x1_expected_error_router.py` + `scripts/run_x1_expected_error_router.py`。
+  严格时间前向：held fold 的期望误差模型只用更早折训练，绝不读取 held
+  actual 或未来折；早期折回退 A61。X3 使用 A57 全矩阵残差 CatBoost
+  （`a57b_residual_a51_cat10_pred`，本地无用户所述 5.119696% 落盘资产，
+  该列 pooled 5.208222%）。
+- 诊断脚本曾出现含未来折训练的虚假增益（+0.016~0.022pp），正式链修正为
+  严格前向后诚实结果如下：
+  | 模式 | routed pooled | vs A61 | vs P3 | routed share | 门禁 |
+  | --- | --- | --- | --- | --- | --- |
+  | prior（历史折 MAPE 先验） | 5.178733% | +0.01701pp | -0.01959pp | 86.5% | 未过（improvement<0.02pp） |
+  | lightgbm（单元格级） | 5.199273% | -0.00353pp | -0.04013pp | 72.1% | 未过 |
+- prior 模式被选组合几乎全部是 `p3_static+a61` / `p3_static+x3`，本质是路由到
+  P3 静态融合（5.159141%），无法超越 P3 本身；lightgbm 单元格级信号弱且过
+  拟合，recent5 仅 1 胜、最差折退化 0.206pp。
+- 结论：X1 v1 未晋级，与 X0 的 split-half 结论一致（fold 粒度诚实路由对 A61
+  无稳定正收益）；P3 静态融合保持为 champion 候选。X1 代码保留为后续
+  origin 级特征（current_value 已并入）或新误差模型的试验台。
+- 产物 `results/raw/runs/experiments/x1_expected_error_router_20260810_{prior,lightgbm}/`；
+  全套 258 项测试通过。
+
 ## 2026-08-10 R1 Exact Reference Input Clone
 
 - 目标：把 `diaofenyuan/aic-gangtie` 从官方评分原表到最终 `input.csv` 的完整

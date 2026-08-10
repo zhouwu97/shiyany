@@ -1,5 +1,21 @@
 # 实验结果
 
+## 2026-08-10 X1 Dynamic Expected-Error Router（未晋级）
+
+七候选动态路由（A61/P3/X3/A64/CausalRolling/Analog/Matured），严格时间前向
+cross-fit：held fold 的期望误差模型只用更早折训练；早期折回退 A61；
+soft blend top2。X3 用 A57 全矩阵残差 CatBoost（本地无 5.119696% 落盘）。
+
+| 模式 | routed pooled MAPE | vs A61 | vs P3 | routed share | 门禁 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| prior（历史折 MAPE 先验） | 5.178733% | +0.01701pp | -0.01959pp | 86.5% | 未过 |
+| lightgbm（单元格级） | 5.199273% | -0.00353pp | -0.04013pp | 72.1% | 未过 |
+
+prior 模式被选组合几乎全是 `p3_static+a61` / `p3_static+x3`（本质路由到 P3
+静态融合 5.159141%，无法超越）；lightgbm 单元格级信号过拟合（recent5 1 胜、
+最差折退化 0.206pp）。结论：X1 v1 未晋级，P3 保持 champion 候选。产物
+`results/raw/runs/experiments/x1_expected_error_router_20260810_{prior,lightgbm}/`。
+
 ## 2026-08-10 R1 Exact Reference Input Clone
 
 把 `diaofenyuan/aic-gangtie` 的完整 input 构造链复刻（raw 加载无 allowlist →
