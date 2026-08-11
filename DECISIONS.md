@@ -1,5 +1,65 @@
 # 决策记录
 
+## 2026-08-10 战略收敛：SAFE60 为最终方案，模型搜索结束
+
+- **PRED-7 Small TCN：STOP**（全 19 折）。严格 causal dilated conv（3 block、
+  hidden 32、~10k 参数、L1、严格 forward）：standalone 0.0591（+0.81pp vs anchor
+  0.0510）、**residual corr vs SAFE60 = 0.9253**（高）、4 个预注册 blend 全不改善
+  （0.0511~0.0515）。按策略 stop 条件（"TCN 与 SAFE60 residual correlation 再次
+  达到非常高的水平 → 深度模型方向基本结束"），深度方向判死。
+- **PRED-6 Target Joint：STOP**（rest=gall−g1 分解不敌直接 gall，前条记录）。
+- **收敛触发**：PRED-6 与 PRED-7 双败，符合战略 §十二 停止规则。
+- **四条结构性路线全部诚实负结果**：PRED-3（残差校准）、PRED-5（trajectory）、
+  PRED-6（target joint）、PRED-7（TCN）。四者共同证据：**现有合法信息集合下的
+  tabular/时序/结构表示均已高度相关（residual corr 0.77–0.97），SAFE60 已捕获
+  绝大多数可利用信号**。
+- **正式决策**：SAFE60 = `acc 42.3 / g1 .9457 / gall .9581 / quality 50` 为当前
+  数据、验证框架和合法信息集合下的**局部性能上限**，作为最终提交方案。**结束
+  模型搜索**；不重启旧模型族微调、不为 0.005pp 重开无限搜索。
+- 剩余可做（非模型）：真正的新合法外部信息/业务变量、完全不同的任务建模；
+  或等待平台出现新的外生证据后按预注册重开单一路线。
+- 提交资产冻结：`pred1_safe60_submission.zip`（SHA 3e8993d7...），与 R1
+  （input SHA 23330d3c...）构成最终提交。
+
+## 2026-08-10 PRED-6 Target Joint Structure：STOP（rest 分解不敌直接 gall）
+
+- 关系验证：`rest=gall−g1` 恒正、占 gall 75.7%，`corr(g1, rest)=−0.21`（联合结构
+  存在），但 rest persistence MAPE 极差（h15 80%，近零值主导）。
+- PRED-6A（SAFE60_g1 冻结 + 独立 rest delta 模型重构 gall）严格 forward 19 折：
+  ridge pooled **−0.0045pp**、et **−0.0010pp**，gall 均更差（0.0512/0.0443 vs
+  anchor 0.0423）。SAFE60_g1 + rest 重构不敌 SAFE60 直接预测 gall。
+- **判定：STOP**。rest 分解未提供超过 SAFE60 直接建模的新信息（SAFE60 已隐式
+  捕获 g1-rest 交互）。不拆 20 种 target transformation。
+- 连续负结果：PRED-3（残差校准）、PRED-5（trajectory）、PRED-6（target joint）
+  —— 现有 tabular 模型族信号接近饱和。
+- 下一步：**PRED-7 Small TCN**（最后的结构性赌注，严格 causal conv、<100k 参数、
+  评价核心 = residual correlation + 4 个预注册 blend）。
+
+## 2026-08-10 后 SAFE60 阶段战略冻结（PRED-6 → PRED-7 → 收敛）
+
+- **Champion 冻结**：SAFE60 = 平台确认 `acc 42.3 / g1 .9457 / gall .9581 / quality 50`，
+  永久作为生产锚点。禁止再调 0.60/0.40、残差比例或小范围参数。
+- **问题转型**：从"精度"转向"残差相关性"。PRED-3/5 负结果（残差相关 0.77–0.97）
+  证明现有模型族共享同一误差结构；唯一出路是**真正解相关的信息源**。
+- **两条主实验（≤2）**：
+  1. **PRED-6 Target Joint Structure**（立即）：`rest = gall − g1`，研究 rest 是否
+     比 gall 更稳/更可预测/更低相关；6A 独立 rest 模型、6B rest delta。baseline
+     必须是"隐式 rest"（`SAFE60_gall − SAFE60_g1`），否则只是换表达复现。
+  2. **PRED-7 Small TCN**（PRED-6 后）：严格 causal conv、2–4 block、参数 <100k、
+     输出 16 cells；评价核心是 `corr(e_TCN, e_SAFE60)` 而非 standalone；只测
+     95/5、90/10、85/15、80/20 四个预注册 blend。
+- **冻结路线**：PRED-R0/R1（regime，重启需跨 forward fold 稳定的可提前识别 regime）、
+  PRED-2/X1-v2（候选池无低相关新模型则不重启）、PRED-3/5 保持 STOP。
+- **晋级门禁（5 层）**：严格合法性 → 相对 SAFE60 pooled ≥0.02pp 或明显低相关
+  residual + 保守 blend 同级改善 → recent5 ≥3/5 → 双 target 安全 → 复杂度惩罚
+  （模型越复杂 margin 要求越高）。Tier S≥0.02 / A 0.01–0.02 / B 0.005–0.01（需低
+  相关或单 target 大幅或 recent 极稳）/ C<0.005 默认 STOP。
+- **acc 期望修正**：平台曲线斜率 ≈1.36 分/1%MAPE；0.02pp OOF ≈ +0.03 acc。
+  PRED-6/7 现实预期 42.3→42.4~42.5，**不是 42.6**。OOF gate ≥0.02pp 是触发条件，
+  不把平台分锚到 42.6。
+- **停止规则**：若 PRED-6 与 PRED-7 均诚实失败 → 正式承认 SAFE60 为当前信息边界
+  下的局部最优，结束模型搜索，不重启旧模型族微调。
+
 ## 2026-08-10 PRED-5 PCA/MultiOutput Trajectory：STOP（核心假设未兑现，诚实负结果）
 
 - 8 步 delta 轨迹，严格 forward 19 折，6 主实验（≤6 网格）：MultiOutput

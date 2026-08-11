@@ -1,0 +1,34 @@
+{
+  "summary": {
+    "tcn_standalone_mape": 0.05906640109238779,
+    "anchor_mape": 0.05099519557251641,
+    "residual_corr_with_safe60": 0.9252855036221166,
+    "cells": 58368,
+    "blend0.05_mape": 0.05107349960876002,
+    "blend0.10_mape": 0.05119197406864411,
+    "blend0.15_mape": 0.05135059890922683,
+    "blend0.20_mape": 0.05154863612264809
+  },
+  "folds": [
+    "dev_01",
+    "dev_02",
+    "dev_03",
+    "dev_04",
+    "dev_05",
+    "dev_06",
+    "dev_07",
+    "dev_08",
+    "dev_09",
+    "dev_10",
+    "dev_11",
+    "dev_12",
+    "dev_13",
+    "dev_14",
+    "dev_15",
+    "dev_16",
+    "dev_17",
+    "dev_18",
+    "dev_19"
+  ],
+  "window": 32
+}
