@@ -238,3 +238,6 @@ results/research_v2/**/*.parquet
 *.pdf
 *.zip
 注意事项.txt
+
+# CatBoost runtime artifacts
+catboost_info/
