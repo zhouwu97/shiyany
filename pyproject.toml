@@ -35,7 +35,7 @@ package-dir = {"" = "code"}
 where = ["code"]
 
 [tool.pytest.ini_options]
-pythonpath = ["code"]
+pythonpath = ["code", "."]
 testpaths = ["tests"]
 addopts = "-ra"
 
