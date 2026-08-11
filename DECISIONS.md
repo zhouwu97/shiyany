@@ -1,5 +1,27 @@
 # 决策记录
 
+## 2026-08-11 Wave 0+1 重开审计：五枪全部诚实负结果，SAFE60 收敛强化（PROJECT_FROZEN 保持）
+
+- **触发**：FINAL_CONVERGENCE §4 重开条件之"真正低相关新 candidate"检查。重开一条缝，
+  只做便宜审计 + 低 DF 专家，SAFE60 冻结不动。全独立 run 目录 + 预注册 gate。
+- **五枪结果**：
+  1. **Wave 0a horizon atlas**：SAFE60 long(75-120) 6.5715% vs short(15-60) 3.6275%，长 horizon 仍主导误差。
+  2. **Wave 0b P0 physical×SAFE60 STOP**：corr 0.324 但 recent5 0.565；standalone g1 +20.01pp
+     （rest 分解放大误差）；dwell4 oracle headroom 0.253pp 存在，但 **causal-selective gate −6.46pp**（选 40% 处 physical 只真胜 14.7%）。
+  3. **Wave 0c stock-flow R² STOP_CONTENT_BUT_CAUSALLY_UNCAPTURABLE**：完美预见 ceiling ΔR² +0.141
+     （transition +0.168），但 OOF 预测未来物理量 ΔR² **−0.068** —— 内容住在不可预测分量。
+  4. **Wave 1a P1 target-aligned STOP**：四变体（median/wmedian/Ridge/Huber）g1 long-horizon
+     全部 +0.9~1.65pp、residual corr 0.868–0.960。target-clock 已被 SAFE60 long-horizon 组件吸收。
+  5. **Wave 1b 价格 hazard 消融 STOP_PRICE_PERMANENTLY_CLOSED**：价格在训练期有真实变化
+     （4 值/49% 切换），但对 rest_transition/holder_flip/avail_contraction 三组物理 transition
+     预测增益全 ~0（max |ΔAUC| 0.015，Δlogloss 无正）。唯一合法未来信息通道 → 永久关闭。
+- **Wave 2/3 全部不触发**：Switching MoE（无候选 + 价格已关）、stock-flow expert（0c 证伪败）、
+  Router（无新 expert）、TimeXer（外生线全负）。
+- **判定**：重开条件未满足。**SAFE60 收敛被强化**。模型搜索保持关闭，提交资产不动。
+- 留档信号：stock-flow ceiling +0.141（transition +0.168）若未来出现新合法外部信息可重新启用；
+  物理状态本身可识别（rest_transition AUC 0.685）但价格不增信息。
+- 产物：`results/runs/20260811_wave01_summary/SUMMARY.md` 及五个 wave run 目录。
+
 ## FINAL CONVERGENCE / PROJECT FROZEN（2026-08-10）
 
 - **Champion = SAFE60**（平台 92.3 = Quality 50 + Accuracy 42.3；g1 .9457 / gall .9581；
