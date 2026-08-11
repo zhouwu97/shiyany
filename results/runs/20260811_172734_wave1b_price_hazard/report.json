@@ -1,0 +1,92 @@
+{
+  "experiment": "wave1b_price_hazard_ablation",
+  "stamp": "20260811_172734",
+  "state_features": [
+    "holder",
+    "holder_slope_4",
+    "rest_current",
+    "avail_B",
+    "generator_gas",
+    "rest_same_slot_7d",
+    "current_price"
+  ],
+  "price_features": [
+    "price_switch_120",
+    "steps_to_price_switch",
+    "n_switches_120",
+    "first_switch_magnitude",
+    "price_range_120",
+    "price_trend_60"
+  ],
+  "results": [
+    {
+      "label": "label_rest_trans",
+      "features": "state_only",
+      "auc": 0.685099670444498,
+      "logloss": 0.6055731921121165,
+      "base_rate": 0.16927083333333334,
+      "rows": 27648
+    },
+    {
+      "label": "label_rest_trans",
+      "features": "state_plus_price",
+      "auc": 0.6734204705469072,
+      "logloss": 0.6131554283535102,
+      "base_rate": 0.16927083333333334,
+      "rows": 27648
+    },
+    {
+      "label": "label_holder_flip",
+      "features": "state_only",
+      "auc": 0.48112010447440756,
+      "logloss": 0.6958898236682713,
+      "base_rate": 0.4095052083333333,
+      "rows": 27648
+    },
+    {
+      "label": "label_holder_flip",
+      "features": "state_plus_price",
+      "auc": 0.49598937415916466,
+      "logloss": 0.6987933242576768,
+      "base_rate": 0.4095052083333333,
+      "rows": 27648
+    },
+    {
+      "label": "label_avail_contract",
+      "features": "state_only",
+      "auc": 0.7126098308472041,
+      "logloss": 0.6495246419059603,
+      "base_rate": 0.49985532407407407,
+      "rows": 27648
+    },
+    {
+      "label": "label_avail_contract",
+      "features": "state_plus_price",
+      "auc": 0.7121387549413154,
+      "logloss": 0.6497072011845885,
+      "base_rate": 0.49985532407407407,
+      "rows": 27648
+    }
+  ],
+  "deltas": [
+    {
+      "label": "label_rest_trans",
+      "delta_auc": -0.011679199897590808,
+      "delta_logloss": -0.007582236241393758
+    },
+    {
+      "label": "label_holder_flip",
+      "delta_auc": 0.014869269684757103,
+      "delta_logloss": -0.002903500589405472
+    },
+    {
+      "label": "label_avail_contract",
+      "delta_auc": -0.00047107590588868486,
+      "delta_logloss": -0.00018255927862820265
+    }
+  ],
+  "verdict": "STOP_PRICE_PERMANENTLY_CLOSED",
+  "pre_registered_gate": {
+    "price_closed_if": "all |ΔAUC|<0.02 AND all Δlogloss<0.01 across all 3 labels"
+  }
+}

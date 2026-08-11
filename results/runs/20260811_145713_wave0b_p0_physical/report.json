@@ -1,0 +1,380 @@
+{
+  "experiment": "wave0b_p0_physical_safe60_audit",
+  "stamp": "20260811_145713",
+  "baseline": "SAFE60",
+  "correlation": [
+    {
+      "scope": "g1_overall",
+      "value": "all",
+      "pearson": 0.3240399189401511,
+      "spearman": 0.36839459493152854
+    },
+    {
+      "scope": "g1_horizon",
+      "value": "15",
+      "pearson": 0.24715160175959844,
+      "spearman": 0.37140461860579355
+    },
+    {
+      "scope": "g1_horizon",
+      "value": "30",
+      "pearson": 0.2722246395526383,
+      "spearman": 0.3623207926760355
+    },
+    {
+      "scope": "g1_horizon",
+      "value": "45",
+      "pearson": 0.2827552382356538,
+      "spearman": 0.3536529863614046
+    },
+    {
+      "scope": "g1_horizon",
+      "value": "60",
+      "pearson": 0.31197794518072525,
+      "spearman": 0.3678427978492416
+    },
+    {
+      "scope": "g1_horizon",
+      "value": "75",
+      "pearson": 0.31516418671636537,
+      "spearman": 0.3622976146698616
+    },
+    {
+      "scope": "g1_horizon",
+      "value": "90",
+      "pearson": 0.33675320084679505,
+      "spearman": 0.375241306454874
+    },
+    {
+      "scope": "g1_horizon",
+      "value": "105",
+      "pearson": 0.36106189674145284,
+      "spearman": 0.3927124274536243
+    },
+    {
+      "scope": "g1_horizon",
+      "value": "120",
+      "pearson": 0.36770861883692735,
+      "spearman": 0.40084873024223594
+    },
+    {
+      "scope": "g1_fold",
+      "value": "dev_01",
+      "pearson": 1.0,
+      "spearman": 0.9999999999999999
+    },
+    {
+      "scope": "g1_fold",
+      "value": "dev_02",
+      "pearson": 0.2371211523681195,
+      "spearman": 0.1802915105465828
+    },
+    {
+      "scope": "g1_fold",
+      "value": "dev_03",
+      "pearson": 0.5218118248427259,
+      "spearman": 0.4530011249388059
+    },
+    {
+      "scope": "g1_fold",
+      "value": "dev_04",
+      "pearson": 0.028457810908422528,
+      "spearman": 0.0342614398580932
+    },
+    {
+      "scope": "g1_fold",
+      "value": "dev_05",
+      "pearson": 0.24837078734279944,
+      "spearman": 0.40910718297203186
+    },
+    {
+      "scope": "g1_fold",
+      "value": "dev_06",
+      "pearson": 0.09507484029735393,
+      "spearman": 0.07002436771366022
+    },
+    {
+      "scope": "g1_fold",
+      "value": "dev_07",
+      "pearson": 0.2636196861729357,
+      "spearman": 0.2915553560491587
+    },
+    {
+      "scope": "g1_fold",
+      "value": "dev_08",
+      "pearson": 0.3255295361285982,
+      "spearman": 0.37035681607217413
+    },
+    {
+      "scope": "g1_fold",
+      "value": "dev_09",
+      "pearson": 0.28789737345023525,
+      "spearman": 0.25083825027709544
+    },
+    {
+      "scope": "g1_fold",
+      "value": "dev_10",
+      "pearson": 0.14414864061436422,
+      "spearman": 0.1935284659983173
+    },
+    {
+      "scope": "g1_fold",
+      "value": "dev_11",
+      "pearson": 0.3374089585992567,
+      "spearman": 0.36559430690630035
+    },
+    {
+      "scope": "g1_fold",
+      "value": "dev_12",
+      "pearson": 0.5567620827999559,
+      "spearman": 0.4564299431874776
+    },
+    {
+      "scope": "g1_fold",
+      "value": "dev_13",
+      "pearson": 0.5138574828314187,
+      "spearman": 0.33759858612424476
+    },
+    {
+      "scope": "g1_fold",
+      "value": "dev_14",
+      "pearson": 0.692790063765966,
+      "spearman": 0.5233382251106793
+    },
+    {
+      "scope": "g1_fold",
+      "value": "dev_15",
+      "pearson": 0.7452267927296862,
+      "spearman": 0.6930985077109899
+    },
+    {
+      "scope": "g1_fold",
+      "value": "dev_16",
+      "pearson": 0.4759062567671579,
+      "spearman": 0.5249354878787943
+    },
+    {
+      "scope": "g1_fold",
+      "value": "dev_17",
+      "pearson": 0.7234536936840847,
+      "spearman": 0.7073695015354163
+    },
+    {
+      "scope": "g1_fold",
+      "value": "dev_18",
+      "pearson": 0.5806767789835047,
+      "spearman": 0.5349988059197769
+    },
+    {
+      "scope": "g1_fold",
+      "value": "dev_19",
+      "pearson": 0.5111815900975848,
+      "spearman": 0.5227151278242017
+    },
+    {
+      "scope": "g1_recent5",
+      "value": "recent5",
+      "pearson": 0.5650053114586124,
+      "spearman": 0.549287906396237
+    }
+  ],
+  "oracle": {
+    "g1_safe60_ape": 5.973643873465074,
+    "g1_phys_ape": 25.98731371195784,
+    "g1_origin_oracle_raw": 5.552435220595689,
+    "g1_origin_oracle_dwell4_60min": 5.720926531377703,
+    "g1_origin_oracle_headroom_vs_safe60_dwell4": 0.25271734208737046,
+    "phys_win_coverage": 0.14720394736842105,
+    "phys_win_mean_margin_pp": 2.8613950943529187,
+    "phys_loss_mean_pp": 23.962210458530738
+  },
+  "causal_selective": {
+    "g1_safe60_ape": 5.973643873465074,
+    "g1_causal_selective_ape": 12.429418444806435,
+    "causal_gain_vs_safe60_pp": -6.455774571341361,
+    "causal_coverage": 0.3980263157894737,
+    "recent5_gain": -4.49127445962844
+  },
+  "physical_rest_report": {
+    "feature_columns": [
+      "generator_1_current",
+      "generator_all_current",
+      "generator_rest_current",
+      "horizon",
+      "feat_generator_gas_total",
+      "feat_generator_rest_efficiency",
+      "feat_generator_1_lag_1",
+      "feat_generator_1_lag_2",
+      "feat_generator_1_lag_4",
+      "feat_generator_1_lag_8",
+      "feat_generator_1_lag_16",
+      "feat_generator_1_lag_32",
+      "feat_generator_1_lag_96",
+      "feat_generator_1_lag_192",
+      "feat_generator_1_lag_288",
+      "feat_generator_1_lag_672",
+      "feat_generator_1_diff_1",
+      "feat_generator_1_diff_2",
+      "feat_generator_1_diff_4",
+      "feat_generator_1_diff_8",
+      "feat_generator_1_diff_16",
+      "feat_generator_1_mean_4",
+      "feat_generator_1_std_4",
+      "feat_generator_1_mean_8",
+      "feat_generator_1_std_8",
+      "feat_generator_1_mean_16",
+      "feat_generator_1_std_16",
+      "feat_generator_1_mean_32",
+      "feat_generator_1_std_32",
+      "feat_generator_1_mean_96",
+      "feat_generator_1_std_96",
+      "feat_generator_1_slope_4",
+      "feat_generator_1_slope_8",
+      "feat_generator_rest_lag_1",
+      "feat_generator_rest_lag_2",
+      "feat_generator_rest_lag_4",
+      "feat_generator_rest_lag_8",
+      "feat_generator_rest_lag_16",
+      "feat_generator_rest_lag_32",
+      "feat_generator_rest_lag_96",
+      "feat_generator_rest_lag_192",
+      "feat_generator_rest_lag_288",
+      "feat_generator_rest_lag_672",
+      "feat_generator_rest_diff_1",
+      "feat_generator_rest_diff_2",
+      "feat_generator_rest_diff_4",
+      "feat_generator_rest_diff_8",
+      "feat_generator_rest_diff_16",
+      "feat_generator_rest_mean_4",
+      "feat_generator_rest_std_4",
+      "feat_generator_rest_min_4",
+      "feat_generator_rest_max_4",
+      "feat_generator_rest_vs_mean_4",
+      "feat_generator_rest_mean_8",
+      "feat_generator_rest_std_8",
+      "feat_generator_rest_min_8",
+      "feat_generator_rest_max_8",
+      "feat_generator_rest_vs_mean_8",
+      "feat_generator_rest_mean_16",
+      "feat_generator_rest_std_16",
+      "feat_generator_rest_min_16",
+      "feat_generator_rest_max_16",
+      "feat_generator_rest_vs_mean_16",
+      "feat_generator_rest_mean_32",
+      "feat_generator_rest_std_32",
+      "feat_generator_rest_min_32",
+      "feat_generator_rest_max_32",
+      "feat_generator_rest_vs_mean_32",
+      "feat_generator_rest_mean_96",
+      "feat_generator_rest_std_96",
+      "feat_generator_rest_min_96",
+      "feat_generator_rest_max_96",
+      "feat_generator_rest_vs_mean_96",
+      "feat_generator_rest_slope_4",
+      "feat_generator_rest_slope_8",
+      "feat_generator_rest_same_slot_median_14d",
+      "feat_generator_rest_same_slot_mean_3d",
+      "feat_generator_rest_vs_same_slot_mean_3d",
+      "feat_generator_rest_same_slot_mean_7d",
+      "feat_generator_rest_vs_same_slot_mean_7d",
+      "feat_generator_rest_same_slot_mean_14d",
+      "feat_generator_rest_vs_same_slot_mean_14d",
+      "feat_generator_rest_efficiency_lag_1",
+      "feat_generator_rest_efficiency_lag_2",
+      "feat_generator_rest_efficiency_lag_4",
+      "feat_generator_rest_efficiency_lag_8",
+      "feat_generator_rest_efficiency_lag_16",
+      "feat_generator_rest_efficiency_lag_32",
+      "feat_generator_rest_efficiency_lag_96",
+      "feat_generator_rest_efficiency_lag_192",
+      "feat_generator_rest_efficiency_lag_288",
+      "feat_generator_rest_efficiency_lag_672",
+      "feat_generator_rest_efficiency_diff_1",
+      "feat_generator_rest_efficiency_diff_2",
+      "feat_generator_rest_efficiency_diff_4",
+      "feat_generator_rest_efficiency_diff_8",
+      "feat_generator_rest_efficiency_diff_16",
+      "feat_generator_rest_efficiency_mean_4",
+      "feat_generator_rest_efficiency_std_4",
+      "feat_generator_rest_efficiency_vs_mean_4",
+      "feat_generator_rest_efficiency_mean_8",
+      "feat_generator_rest_efficiency_std_8",
+      "feat_generator_rest_efficiency_vs_mean_8",
+      "feat_generator_rest_efficiency_mean_16",
+      "feat_generator_rest_efficiency_std_16",
+      "feat_generator_rest_efficiency_vs_mean_16",
+      "feat_generator_rest_efficiency_mean_32",
+      "feat_generator_rest_efficiency_std_32",
+      "feat_generator_rest_efficiency_vs_mean_32",
+      "feat_generator_rest_efficiency_mean_96",
+      "feat_generator_rest_efficiency_std_96",
+      "feat_generator_rest_efficiency_vs_mean_96",
+      "feat_generator_rest_efficiency_slope_4",
+      "feat_generator_rest_efficiency_slope_8",
+      "feat_target_price_tplus_15",
+      "feat_target_price_tplus_30",
+      "feat_target_price_tplus_45",
+      "feat_target_price_tplus_60",
+      "feat_target_price_tplus_75",
+      "feat_target_price_tplus_90",
+      "feat_target_price_tplus_105",
+      "feat_target_price_tplus_120",
+      "feat_price_switch_within_120",
+      "feat_steps_to_price_switch",
+      "feat_gas_holder",
+      "feat_gas_holder_lag_1",
+      "feat_gas_holder_lag_2",
+      "feat_gas_holder_lag_4",
+      "feat_gas_holder_lag_8",
+      "feat_gas_holder_lag_16",
+      "feat_gas_holder_diff_1",
+      "feat_gas_holder_diff_2",
+      "feat_gas_holder_diff_4",
+      "feat_gas_holder_slope_4",
+      "feat_gas_holder_slope_8",
+      "feat_gas_holder_slope_16",
+      "feat_gas_balance",
+      "current_price",
+      "future_price_15",
+      "price_delta_15",
+      "future_price_30",
+      "price_delta_30",
+      "future_price_45",
+      "price_delta_45",
+      "future_price_60",
+      "price_delta_60",
+      "future_price_75",
+      "price_delta_75",
+      "future_price_90",
+      "price_delta_90",
+      "future_price_105",
+      "price_delta_105",
+      "future_price_120",
+      "price_delta_120",
+      "h_105",
+      "h_120",
+      "h_15",
+      "h_30",
+      "h_45",
+      "h_60",
+      "h_75",
+      "h_90"
+    ],
+    "state_semantics": {
+      "state_0": "rest < 36MW",
+      "state_1": "36MW <= rest < 132MW",
+      "state_2": "rest >= 132MW",
+      "transition": "|future rest - current rest| >= 20MW"
+    }
+  },
+  "decision": {
+    "go_candidate": false,
+    "checks": {
+      "corr_le_0.70": true,
+      "standalone_g1_within_0.5pp": false,
+      "dwell4_oracle_headroom_ge_0.08pp": true,
+      "causal_gate_gain_ge_0.05pp_and_coverage_and_recent5_stable": false
+    },
+    "verdict": "STOP"
+  }
+}

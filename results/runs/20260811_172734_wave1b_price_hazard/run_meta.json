@@ -1,0 +1,9 @@
+{
+  "run": "wave1b_price_hazard_ablation",
+  "stamp": "20260811_172734",
+  "date": "2026-08-11T17:27:40.490977",
+  "python": "E:\\AI\\shiyan\\.venv\\Scripts\\python.exe",
+  "note": "已知未来电价是唯一合法未来信息通道；若对物理 transition 无预测增益则永久关闭",
+  "status": "complete",
+  "verdict": "STOP_PRICE_PERMANENTLY_CLOSED"
+}

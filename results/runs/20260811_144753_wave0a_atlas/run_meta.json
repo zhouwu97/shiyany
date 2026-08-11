@@ -1,0 +1,20 @@
+{
+  "run": "wave0a_safe60_horizon_atlas",
+  "stamp": "20260811_144753",
+  "date": "2026-08-11T14:47:53.473192",
+  "python": "E:\\AI\\shiyan\\.venv\\Scripts\\python.exe",
+  "input": "E:\\AI\\shiyan\\results\\raw\\runs\\audits\\pred1_gate_c_20260810\\merged_safe60_eval.csv",
+  "inputs_sha": {
+    "note": "see logs"
+  },
+  "status": "complete",
+  "outputs": [
+    "atlas_long.csv",
+    "horizon_by_target.csv",
+    "short_long_split.csv"
+  ],
+  "pre_registered": {
+    "purpose": "决定 P1 target-aligned 75-120 是否 S 级",
+    "decision_rule": "SAFE60 长 horizon MAPE 仍显著高于短 horizon -> P1 保持优先级"
+  }
+}

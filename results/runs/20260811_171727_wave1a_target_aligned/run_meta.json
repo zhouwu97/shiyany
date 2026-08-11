@@ -1,0 +1,46 @@
+{
+  "run": "wave1a_target_aligned_long_horizon_75_120",
+  "stamp": "20260811_171727",
+  "date": "2026-08-11T17:17:35.180094",
+  "python": "E:\\AI\\shiyan\\.venv\\Scripts\\python.exe",
+  "baseline": "SAFE60 on g1 × {75,90,105,120}",
+  "config": {
+    "cycle_days": [
+      1,
+      2,
+      3,
+      7
+    ],
+    "horizons": [
+      75,
+      90,
+      105,
+      120
+    ],
+    "ridge_features": [
+      "anchor_1d",
+      "anchor_2d",
+      "anchor_3d",
+      "anchor_7d",
+      "y_t"
+    ],
+    "weights_wmedian": [
+      4,
+      3,
+      2,
+      1
+    ]
+  },
+  "best_expert": "horizon_huber",
+  "best_mape_pp": 8.385126688171644,
+  "best_delta_pp": 0.9016436195310187,
+  "best_residual_corr_pearson": 0.9595056828304839,
+  "best_dwell4_oracle_headroom_pp": 0.3945550876134185,
+  "pre_registered_gates": {
+    "go_if_standalone_beats_safe60": "delta_pp < 0",
+    "go_if_corr_le_0.70_and_headroom_ge_0.10pp": "if delta_pp ≤ 0.5pp",
+    "go_if_corr_le_0.70_and_headroom_ge_0.15pp": "if delta_pp > 0.5pp (防便宜低相关)"
+  },
+  "verdict": "STOP",
+  "status": "complete"
+}

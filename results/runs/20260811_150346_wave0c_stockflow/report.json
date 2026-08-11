@@ -1,0 +1,71 @@
+{
+  "experiment": "wave0c_stock_flow_residual_r2",
+  "stamp": "20260811_150346",
+  "baseline": "SAFE60",
+  "note": "crossfit ceiling = forward cross-fit given ACTUAL future physical trajectory (perfect-foresight upper bound); causal = forward cross-fit, origin state only",
+  "results": [
+    {
+      "scope": "signed",
+      "r2_causal_origin_state": -0.007740943970166336,
+      "r2_causal_plus_pred_future": -0.07531479696886834,
+      "r2_crossfit_ceiling_oracle_future": 0.13318784234775982,
+      "r2_insample_ceiling_oracle_future": 0.2146213955661066,
+      "delta_r2_crossfit_ceiling_vs_causal": 0.14092878631792616,
+      "delta_r2_pred_future_vs_causal": -0.067573852998702,
+      "covered_causal_rows": 27648
+    },
+    {
+      "scope": "abs",
+      "r2_causal_origin_state": 0.410211593805622,
+      "r2_causal_plus_pred_future": 0.39064224714378337,
+      "r2_crossfit_ceiling_oracle_future": 0.4137474878673012,
+      "r2_insample_ceiling_oracle_future": 0.45263224545958713,
+      "delta_r2_crossfit_ceiling_vs_causal": 0.003535894061679201,
+      "delta_r2_pred_future_vs_causal": -0.019569346661838627,
+      "covered_causal_rows": 27648
+    }
+  ],
+  "regimes": [
+    {
+      "regime": "all",
+      "rows": 29184,
+      "r2_causal_origin": -0.007740943970166336,
+      "r2_crossfit_ceiling_oracle": 0.13318784234775982,
+      "delta_ceiling_vs_causal": 0.14092878631792616
+    },
+    {
+      "regime": "transition_rest",
+      "rows": 4991,
+      "r2_causal_origin": 0.08802947870448152,
+      "r2_crossfit_ceiling_oracle": 0.2562132396167581,
+      "delta_ceiling_vs_causal": 0.1681837609122766
+    },
+    {
+      "regime": "holder_fast",
+      "rows": 9728,
+      "r2_causal_origin": 0.06888878619206651,
+      "r2_crossfit_ceiling_oracle": 0.19318615853712462,
+      "delta_ceiling_vs_causal": 0.12429737234505811
+    },
+    {
+      "regime": "price_switch",
+      "rows": 13376,
+      "r2_causal_origin": -0.02348991809111811,
+      "r2_crossfit_ceiling_oracle": 0.11539365842595362,
+      "delta_ceiling_vs_causal": 0.13888357651707173
+    }
+  ],
+  "future_delta_predictability": {
+    "f_holder_delta": 0.18213943010166234,
+    "f_prod_delta": 0.06947394003438345,
+    "f_avail_delta": 0.16267550996738223,
+    "f_rest_delta": 0.10375848692822287,
+    "f_gen_gas_delta": 0.021316758742311426
+  },
+  "decision": {
+    "ceiling_has_content": true,
+    "transition_regime_ceiling_delta": 0.1681837609122766,
+    "causal_pred_future_content": false
+  },
+  "verdict": "STOP_CONTENT_BUT_CAUSALLY_UNCAPTURABLE"
+}

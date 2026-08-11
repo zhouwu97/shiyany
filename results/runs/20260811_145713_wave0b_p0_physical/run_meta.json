@@ -1,0 +1,32 @@
+{
+  "run": "wave0b_p0_physical_safe60_audit",
+  "stamp": "20260811_145713",
+  "date": "2026-08-11T14:58:09.933784",
+  "python": "E:\\AI\\shiyan\\.venv\\Scripts\\python.exe",
+  "baseline": "SAFE60 = 0.6*X3 + 0.4*A61 (from X3 replay OOF)",
+  "physical_anchor": "time_ordered_physical_rest_oof(baseline_column=safe60_pred), strictly earlier folds only",
+  "feature_columns": [
+    "current_price",
+    "feat_gas_balance",
+    "feat_gas_holder",
+    "feat_generator_gas_total",
+    "feat_price_switch_within_120",
+    "feat_steps_to_price_switch",
+    "prob_state_0",
+    "prob_state_1",
+    "prob_state_2",
+    "prob_transition",
+    "rest_current"
+  ],
+  "pre_registered_gates": {
+    "corr_le_0.70": true,
+    "standalone_g1_within_0.5pp": false,
+    "dwell4_oracle_headroom_ge_0.08pp": true,
+    "causal_gate_gain_ge_0.05pp_and_coverage_and_recent5_stable": false
+  },
+  "caveats": [
+    "state labels in _physical_labels use future rest_actual -> regime NOT origin-identifiable; causal gate is the decisive test, not oracle",
+    "causal-selective gate: LogisticRegression fit on strictly earlier folds, origin-level, features=4 state probs + physical + price"
+  ],
+  "status": "complete"
+}
