@@ -66,7 +66,6 @@ def main() -> None:
 
     frame = dataset.frame
     rest_series = pd.to_numeric(frame["generator_all"], errors="coerce") - pd.to_numeric(frame["generator_1"], errors="coerce")
-    g1_series = pd.to_numeric(frame["generator_1"], errors="coerce")
 
     safe60 = pd.read_csv(SAFE60_OOF, parse_dates=["origin_time", "train_end"])
     fold_order = [f"dev_{i:02d}" for i in range(1, 20)]

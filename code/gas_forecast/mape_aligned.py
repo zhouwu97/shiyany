@@ -563,7 +563,6 @@ def build_mape_aligned_oof(
         work[raw_column] = work[parent_column].to_numpy(dtype=float)
     training_records: list[dict[str, object]] = []
     weight_records: list[dict[str, object]] = []
-    started = time.perf_counter()
     worker_results = Parallel(n_jobs=n_jobs, verbose=10)(
         delayed(_process_fold)(
             frame,

@@ -96,7 +96,9 @@ def main() -> None:
         horizon = int(col.split("_t+")[1].split("_")[0])
         s = agg_pred[col].to_frame().reset_index()
         s.columns = ["origin_time", "value"]
-        s["target"] = target; s["horizon"] = horizon; s["fold"] = "scoring"
+        s["target"] = target
+        s["horizon"] = horizon
+        s["fold"] = "scoring"
         parts.append(s)
     agg_long = pd.concat(parts, ignore_index=True).rename(columns={"value": "aggressive_r75_lgb20_pred"})
 

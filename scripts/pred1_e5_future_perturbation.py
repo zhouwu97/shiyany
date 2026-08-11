@@ -50,8 +50,6 @@ def main() -> None:
 
     scoring_origins = pd.DatetimeIndex(test.index)
     sampled = [scoring_origins[i] for i in np.linspace(0, len(scoring_origins) - 1, args.samples).astype(int)]
-    # 覆盖 3 个隐藏 origin（前向填充点）
-    hidden = [o for o in scoring_origins if ctx.loc[o, "generator_1"] != ctx.loc[o, "generator_1"] or False]
     numeric_cols = list(ctx.select_dtypes(include=[np.number]).columns)
     rng = np.random.default_rng(20250731)
 

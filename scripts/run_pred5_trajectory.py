@@ -131,7 +131,6 @@ def main() -> None:
             imputer = SimpleImputer(strategy="median").fit(Xtr)
             Xtr = imputer.transform(Xtr)
             Xte = imputer.transform(X[dataset.frame.index.get_indexer(held_origins)])
-            Yte = _trajectory_deltas(dataset.frame, target, held_origins)
             cur = pd.to_numeric(dataset.frame[target], errors="coerce").reindex(held_origins).to_numpy(float)
             for kind in kinds:
                 pred_delta = _fit_predict(Xtr, Ytr_v, Xte, kind)

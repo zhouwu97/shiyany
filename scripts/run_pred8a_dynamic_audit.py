@@ -93,7 +93,8 @@ def main() -> None:
         if winner.iloc[i] == winner.iloc[i - 1]:
             cur += 1
         else:
-            run_len.append(cur); cur = 1
+            run_len.append(cur)
+            cur = 1
     run_len.append(cur)
     dwell = pd.Series(run_len)
     # transition matrix

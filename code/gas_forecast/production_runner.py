@@ -13,23 +13,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import json
-from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pandas as pd
 
 from gas_forecast.aggressive import project_production_predictions
-from gas_forecast.config import ForecastConfig, forecast_config_from_dict
+from gas_forecast.config import ForecastConfig
 from gas_forecast.features import build_causal_features
 from gas_forecast.rich_residual import (
-    CHAMPION_PREDICTION_FEATURE,
-    RICH_FEATURE_GROUPS,
     RichResidualCorrector,
     RichResidualSpec,
     rich_feature_config,
-    select_rich_feature_columns,
 )
 
 # --- RichGas 冻结 spec（与 rich_gas_blend_30_20260803 一致） ---

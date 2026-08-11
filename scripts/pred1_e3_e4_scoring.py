@@ -28,7 +28,6 @@ from gas_forecast.mape_aligned import build_x3_production_predictions
 from gas_forecast.production_runner import (
     A51_OUTPUT_COLUMN,
     RICH_GAS_OUTPUT_COLUMN,
-    SPLICE_OUTPUT_COLUMN,
     apply_short_long_splice,
     build_a51_production_predictions,
     build_a60_production_predictions,
@@ -36,7 +35,7 @@ from gas_forecast.production_runner import (
 )
 from gas_forecast.recursive_arx import build_a61_production_predictions
 from gas_forecast.rich_residual import RICH_FEATURE_GROUPS, rich_feature_config
-from gas_forecast.seed_contract import PRODUCTION_SEED_SLOT, resolve_seed_position
+from gas_forecast.seed_contract import resolve_seed_position
 from gas_forecast.workflow import predict_rolling
 
 TRAIN_DIR = Path("data/raw/official/初赛-参赛者使用")

@@ -118,7 +118,6 @@ def main() -> None:
 
     safe60 = pd.read_csv(SAFE60_OOF, parse_dates=["origin_time", "train_end"])
     folds = [f.strip() for f in args.folds.split(",")]
-    results = {w: [] for w in BLEND_WEIGHTS}
     standalone_rows = []
 
     for fold in folds:
@@ -143,7 +142,8 @@ def main() -> None:
 
         model = SmallTCN(n_ch, 16)
         opt = torch.optim.Adam(model.parameters(), lr=1e-3)
-        xt = torch.tensor(Xtr); yt = torch.tensor(Ytr)
+        xt = torch.tensor(Xtr)
+        yt = torch.tensor(Ytr)
         for epoch in range(args.epochs):
             model.train()
             perm = torch.randperm(len(xt))

@@ -18,7 +18,6 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 import sys
-from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -78,8 +77,6 @@ def _audit_label_maturity(result) -> dict[str, object]:
     trace["history_max_time"] = pd.to_datetime(trace["history_max_time"], errors="coerce")
     trace["label_max_time"] = pd.to_datetime(trace["label_max_time"], errors="coerce")
     trace["train_end"] = pd.to_datetime(trace["train_end"], errors="coerce")
-    maturity_1 = (trace["label_max_time"] <= trace["train_end"]).fillna(True)
-    maturity_2 = (trace["history_max_time"] <= trace["train_end"]).fillna(True)
     return {
         "skipped": False,
         "trained_records": int(trace["status"].eq("trained").sum()),

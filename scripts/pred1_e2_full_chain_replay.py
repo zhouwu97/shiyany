@@ -20,16 +20,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from gas_forecast.aggressive import project_production_predictions
 from gas_forecast.config import forecast_config_from_dict
 from gas_forecast.data import align_tables
 from gas_forecast.features import build_causal_features, load_price_schedule
 from gas_forecast.mape_aligned import build_x3_production_predictions
 from gas_forecast.production_runner import (
-    A51_PARENT_COLUMN,
     A51_OUTPUT_COLUMN,
     RICH_GAS_OUTPUT_COLUMN,
-    SPLICE_OUTPUT_COLUMN,
     apply_short_long_splice,
     build_a51_production_predictions,
     build_a60_production_predictions,

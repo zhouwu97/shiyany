@@ -169,16 +169,6 @@ def _gate_report(
     safe60 = _safe60(work)
     safe60_recent5 = _safe60(recent5)
 
-    a61 = a61_oof[["fold", "origin_time", "target", "horizon", "actual", "a61_recursive_blend_05_pred"]].rename(
-        columns={"a61_recursive_blend_05_pred": "a61_pred"}
-    )
-    merged_a61 = work[["fold", "origin_time", "target", "horizon", "actual", "a61_pred"]].merge(
-        a61[["fold", "origin_time", "target", "horizon", "a61_pred"]],
-        on=["fold", "origin_time", "target", "horizon"],
-        suffixes=("_s", "_a"),
-    )
-    a61_aligned = merged_a61["a61_pred_a"].to_numpy(dtype=float)
-
     x3_score = score_oof_long(work, "x3_cat_mae_pred")["pooled_mape"]
     a61_score = score_oof_long(work, "a61_pred")["pooled_mape"]
     safe60_score = score_oof_long(safe60, "safe60_pred")["pooled_mape"]
