@@ -1,5 +1,24 @@
 # 决策记录
 
+## 2026-08-10 PRED-8A Dynamic Opportunity Audit：STOP（因果测试失败，动态专家路线关闭）
+
+- 纯诊断零 ML，四专家（SAFE60/X3/A61/A64），严格 chronological matured-loss replay。
+- 三数字：
+  1) **Constrained oracle（dwell4/60min）= 4.7032%**（gap 0.396pp vs SAFE60 5.0995%）；
+      raw origin oracle 4.5825、dwell2 4.6441、dwell8 4.7778。
+  2) **Regret 自相关 lag1 均值 0.637**（X3 .615/A61 .621/A64 .676），lag4 衰减到 ~0.2；
+      winner dwell 中位数 1、均值 2.2、max 24；X3/A61 自转移 0.54/0.58。
+  3) **Delayed tracker（trailing 30/60/120/240min + EMA0.25）全部不敌 SAFE60**：
+      best 5.1061%（+0.0066pp worse）。
+- **判定：STOP**。按 §3.12，Strong/Weak GO 均要求 tracker 正收益（≥0.03 / 0.01–0.03pp），
+  tracker 反而更差 → 未达任何 GO。regret 持续性强（0.637）是真实信号，但 trailing/EMA
+  loss 选 expert 噪声太大（16-cell APE 方差、winner dwell 中位 1），因果上不可靠预判
+  下一 origin 赢家。**X1 模式再现：Oracle 大 + 持续性有，合法因果利用失败。**
+- 结论：动态专家路线（PRED-8/9/10）关闭，不进入复杂 router。与 X1、PRED-3/5/6/7
+  共同证据：SAFE60 在合法信息集合下的信号空间已基本榨尽。
+- 保留：regret 持续性数字入档，若未来出现真正低相关新 candidate 再考虑；否则不再
+  为 0.02–0.03pp 潜在收益重开动态线。
+
 ## 2026-08-10 战略收敛：SAFE60 为最终方案，模型搜索结束
 
 - **PRED-7 Small TCN：STOP**（全 19 折）。严格 causal dilated conv（3 block、
