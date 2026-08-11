@@ -15,14 +15,38 @@
 
 ## 当前正式结果
 
-Strict C0 冻结基线为 pooled MAPE `5.297932%`（含最终 blind 的全 OOF 口径）。冲分计划完成 Oracle、严格前向 stacking、E21 crossing、Price、Physical/X1 和 Diversity 后，冻结候选为 `R75 + 20% lgb_residual`：
+> **FINAL CHAMPION: SAFE60**（模型搜索已收敛，见 `FINAL_CONVERGENCE.md`）
 
-- development（不含 blind）经生产容量投影后 MAPE `5.229437%`，相对同口径 C0 改善 `0.030575pp`；
-- 19 个 development folds 中赢 14 个，最近 5 折赢 4 个；
-- 冻结后唯一一次 blind 确认改善 `0.040860pp`；
-- Production Gate 的 250 个未来扰动、历史 92 项 pytest、192×16 提交校验和确定性 ZIP 全部通过；后续研究分支回归后当前完整测试套件为 128 项。
+```
+SAFE60 = 0.60 × X3 + 0.40 × A61
+```
 
-正式初赛提交为 `提交这个/咕咕嘎嘎_gas_predict_prelim.zip`，ZIP 根目录只包含 `input.csv` 与 `s_result.csv`。第二梯队的固定 CatBoost 与 Recursive ARX 已在独立、无 blind 的 development OOF 上复验；A61 仅保留预注册的 5% Recursive ARX 融合，尚未生产重训、查看 blind 或替换正式提交。复赛、决赛和优化调度仍不实现。
+| 指标 | 值 |
+| --- | --- |
+| **Platform** | **92.3/100 = Quality 50 + Accuracy 42.3**（Success A `PLATFORM_IMPROVEMENT_CONFIRMED`） |
+| generator_1 MAPE | **5.43%**（1-MAPE 0.9457） |
+| generator_all MAPE | **4.19%**（1-MAPE 0.9581） |
+| development pooled | **5.099520%**（相对 A61 +0.0962pp，19/19 fold 胜，bootstrap P=1.0） |
+
+**唯一正式提交资产**：`results/raw/runs/audits/pred1_e34_scoring_20260810/pred1_safe60_submission.zip`
+（ZIP SHA `3e8993d7…`，含 `input.csv` + `s_result.csv`）。
+
+- `input.csv` SHA `23330d3c…` = 平台验证 50/50 的冻结 R1，字节级未改
+- `s_result.csv` SHA `a73ded18…` = 冻结 SAFE60（192×16）
+- 复现入口：`scripts/pred1_e3_e4_scoring.py`（评分推理）→ `pred1_e6_freeze_safe60.py`（冻结）
+  → `pred1_package_upload.py`（打包）
+
+**生产链已完整验证**：六层（RichGas→A51→splice→A60→A61→X3）E2 全 19 折机器精度
+复现；E5 未来扰动 32/32 零失败；3-origin 隐藏 current 前向填充定向复核全绿；
+R1 input 平台 50/50。
+
+### ⚠️ DO NOT USE（非法/已撤销）
+
+- `future_row_reconstruction`（历史记录 `89.9 / accuracy 49.9 / 1-MAPE 0.9993`）：
+  **future-row Oracle，非因果，已撤销，禁止上传**。不得作为合法成绩引用。
+- 旧提交 `提交这个/咕咕嘎嘎_gas_predict_prelim.zip` 已作废；唯一合法上传资产是
+  `pred1_safe60_submission.zip`。
+- 复赛、决赛和优化调度仍不实现；初赛验证结果不直接外推这些赛段。
 
 ## 环境
 

@@ -1,5 +1,19 @@
 # 决策记录
 
+## FINAL CONVERGENCE / PROJECT FROZEN（2026-08-10）
+
+- **Champion = SAFE60**（平台 92.3 = Quality 50 + Accuracy 42.3；g1 .9457 / gall .9581；
+  development 5.099520%）。正式提交 `pred1_safe60_submission.zip`（SHA 3e8993d7…）。
+- **已关闭路线**：X1（router）、PRED-3（残差校准）、PRED-5（trajectory）、
+  PRED-6（target joint）、PRED-7（TCN）、PRED-8A（动态专家）。全部诚实负结果。
+- **不再重开搜索**：CatBoost/Ridge 权重、TCN 参数、小于 0.02–0.03pp 的 OOF 抖动、
+  动态路由参数、残差校准变体。研究自由度锁定。
+- **仅三种情况允许重新开线**：① 新增合法外部信息；② 出现真正低相关的新
+  candidate（与 SAFE60 residual corr 显著 <0.7）；③ 比赛数据/评分协议变化。
+- **保留依据**：`regret lag1 autocorr = 0.637` 是未来出现低相关专家后重新研究
+  routing 的依据，**不代表当前 router 可用**（PRED-8A causal tracker 失败）。
+- 非法 Oracle（future-row 89.9 / accuracy 49.9）永久隔离，禁止引用。
+
 ## 2026-08-10 PRED-8A Dynamic Opportunity Audit：STOP（因果测试失败，动态专家路线关闭）
 
 - 纯诊断零 ML，四专家（SAFE60/X3/A61/A64），严格 chronological matured-loss replay。

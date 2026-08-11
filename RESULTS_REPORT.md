@@ -1,5 +1,42 @@
 # 实验结果
 
+## FINAL STATUS — SAFE60 最终冠军（模型搜索已收敛）
+
+**正式冠军：SAFE60**（平台验证 Success A `PLATFORM_IMPROVEMENT_CONFIRMED`）
+
+| 指标 | 值 |
+| --- | --- |
+| Platform | **92.3/100 = Quality 50.0 + Accuracy 42.3** |
+| g1 1-MAPE | **0.9457**（MAPE 5.43%） |
+| gall 1-MAPE | **0.9581**（MAPE 4.19%） |
+| development pooled | **5.099520%**（= 0.60×X3 + 0.40×A61，冻结权重） |
+
+正式提交资产：`pred1_safe60_submission.zip`（SHA `3e8993d7…`）+ 冻结 R1 input
+（SHA `23330d3c…`）。生产链六层（RichGas→A51→splice→A60→A61→X3）E2 19/19 折
+机器精度复现；E5 未来扰动 32/32 零失败；E6 s_result 冻结。
+
+### 已关闭路线（诚实负结果）
+
+| 路线 | 假设 | 结果 | 停止原因 |
+| --- | --- | --- | --- |
+| X1 expected-error router | 七候选动态路由 | 未晋级 | prior +0.017pp / lgb −0.0035pp，均未过 0.02pp |
+| PRED-3 残差校准 | SAFE60 gall 长步长 bias 可校正 | STOP | 最佳 +0.008pp，recent5 2/5，时间反转 |
+| PRED-5 共享 trajectory | 8 步 delta 轨迹新结构 | STOP | residual corr 0.77–0.97，blend 无收益 |
+| PRED-6 target joint | rest=gall−g1 分解 | STOP | 重构 gall 不敌直接预测 |
+| PRED-7 small TCN | 因果时序表示低相关 | STOP | residual corr 0.925，blend 全中性 |
+| PRED-8A 动态机会审计 | matured-loss 在线选专家 | STOP | **Oracle 4.7032% + regret AC 0.637 但 causal tracker 5.1061% 不敌 5.0995%** |
+
+PRED-8A 三数字：60min constrained Oracle **4.7032%**、regret lag1 autocorr **0.637**、
+delayed causal tracker 最佳 **5.1061%**（仍差于 SAFE60 5.0995%）。regret 持续性是
+真实信号，但合法因果追踪无法可靠预判下一 origin 赢家 → 动态专家路线关闭。
+
+> ⚠️ **非法 Oracle 永久隔离**：历史记录中 `89.9 / accuracy 49.9 / 1-MAPE 0.9993`
+> 是 future-row Oracle 包（使用未来生产行），**非因果、已撤销、禁止上传**，不得
+> 作为合法成绩引用。
+
+重新开放条件（仅三者之一）：新增合法外部信息；出现真正低相关的新 candidate；
+比赛数据/评分协议变化。
+
 ## 2026-08-10 X1 Dynamic Expected-Error Router（未晋级）
 
 七候选动态路由（A61/P3/X3/A64/CausalRolling/Analog/Matured），严格时间前向
